@@ -26,6 +26,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: cqai-club/cqai-account-sdk
+          token: ${{ secrets.CQAI_ACCOUNT_SDK_TOKEN }}
           path: cqai-account-sdk
 
       - name: Link account SDK into the expected sibling path

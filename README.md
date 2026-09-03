@@ -75,7 +75,10 @@ python3 -m http.server 4174 -d apps/admin/dist
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PATH`
+- `CQAI_ACCOUNT_SDK_TOKEN`（读取私有 `cqai-account-sdk` 仓库的 GitHub token）
 - `DEPLOY_COMMAND`（可选，默认 `systemctl restart cqai-account-service`）
+
+`CQAI_ACCOUNT_SDK_TOKEN` 建议使用 GitHub fine-grained personal access token，只授予 `cqai-club/cqai-account-sdk` 的只读 Contents 权限。如果后续把 `@cqaiclub/cqai-account-sdk` 发布到 npm，就可以移除这个 token 和第二次 checkout。
 
 ## Logto 配置
 
