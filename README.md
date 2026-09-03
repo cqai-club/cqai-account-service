@@ -104,6 +104,10 @@ LOGTO_CLIENT_PLATFORM_MAP={"lingweave-logto-client-id":"lingweave","image-app-cl
 
 `NEW_API_INTERNAL_TOKEN` 不得使用 `VITE_` 前缀，也不得提交到 Git，且不能通过浏览器管理页提交。
 
+通过 Nginx 等反向代理终止 HTTPS 时，应保留原始 `Host` 请求头。服务会把浏览器的
+`https://<Host>` Origin 与内部收到的 `http://<Host>` 请求视为同源；其他来源仍必须逐项配置在
+`CORS_ALLOWED_ORIGINS` 中。
+
 `CONFIG_STORE_PATH` 的 JSON 持久化是进程内串行、文件原子替换方案，适合单实例部署。多副本不要让多个服务进程直接共享同一个文件；请改用外部配置存储/数据库，或把管理写入固定的单实例。
 
 ## 管理控制台

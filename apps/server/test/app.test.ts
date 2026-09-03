@@ -118,6 +118,20 @@ test('allows same-origin preflight without requiring the service origin in CORS 
   assert.equal(response.headers.get('access-control-allow-origin'), 'https://account.example.com')
 })
 
+test('does not treat a different HTTPS host as same-origin behind a proxy', async () => {
+  const app = createApp(config, { verifier, accounts })
+  const response = await app.request('http://account.example.com/healthz', {
+    headers: { Origin: 'https://evil.example.com' },
+  })
+
+  assert.equal(response.status, 403)
+
+  const malformedOrigin = await app.request('http://account.example.com/healthz', {
+    headers: { Origin: 'https://account.example.com/path' },
+  })
+  assert.equal(malformedOrigin.status, 403)
+})
+
 test('replaces browser authorization and streams the NewAPI response', async () => {
   let upstreamAuthorization = ''
   let upstreamBody = ''

@@ -274,7 +274,20 @@ function isAllowedOrigin(origin: string, requestUrl: string, allowedOrigins: Rea
   if (allowedOrigins.has(origin)) return true
   if (!origin) return false
   try {
-    return new URL(requestUrl).origin === origin
+    const browserOrigin = new URL(origin)
+    if (browserOrigin.origin !== origin) return false
+    const serverUrl = new URL(requestUrl)
+    if (serverUrl.origin === browserOrigin.origin) return true
+
+    // TLS is commonly terminated by a reverse proxy, so the Node adapter sees
+    // http://example.com while the browser correctly sends
+    // Origin: https://example.com. Treat only that secure protocol upgrade on
+    // the exact same host (including any explicit port) as same-origin. The
+    // reverse direction remains forbidden and unrelated hosts still require
+    // an explicit CORS allowlist entry.
+    return serverUrl.protocol === 'http:'
+      && browserOrigin.protocol === 'https:'
+      && serverUrl.host === browserOrigin.host
   } catch {
     return false
   }
