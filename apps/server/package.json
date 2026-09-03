@@ -1,0 +1,23 @@
+{
+  "name": "@cqaiclub/account-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --env-file-if-exists=.env --import tsx/esm --watch src/index.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "test": "node --import tsx/esm --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cqaiclub/cqai-account-sdk": "file:../../../cqai-account-sdk",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "jose": "^5.9.6"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
