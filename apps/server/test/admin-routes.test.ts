@@ -251,8 +251,13 @@ test('same-origin admin asset routes serve the built UI when configured', async 
     assert.equal(html.status, 200)
     assert.equal(html.headers.get('content-type'), 'text/html; charset=UTF-8')
     assert.match(await html.text(), /main\.js/)
-    const script = await appWithUi.request('/admin/main.js')
+    // Reproduce a module-script fetch behind an HTTPS-terminating proxy. The
+    // browser sends the public HTTPS Origin while the Node adapter sees HTTP.
+    const script = await appWithUi.request('http://account.example.com/admin/main.js?v=2', {
+      headers: { Origin: 'https://account.example.com' },
+    })
     assert.equal(script.status, 200)
+    assert.equal(script.headers.get('access-control-allow-origin'), 'https://account.example.com')
     assert.match(await script.text(), /console\.log/)
     const oidcScript = await appWithUi.request('/admin/oidc.js')
     assert.equal(oidcScript.status, 200)
