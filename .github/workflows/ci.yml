@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout account service
+        uses: actions/checkout@v4
+
+      - name: Checkout account SDK
+        uses: actions/checkout@v4
+        with:
+          repository: cqai-club/cqai-account-sdk
+          path: cqai-account-sdk
+
+      - name: Link account SDK into the expected sibling path
+        run: ln -sfn "$GITHUB_WORKSPACE/cqai-account-sdk" "$GITHUB_WORKSPACE/../cqai-account-sdk"
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Diff check
+        run: git diff --check

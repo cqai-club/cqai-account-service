@@ -66,6 +66,17 @@ python3 -m http.server 4174 -d apps/admin/dist
 
 发布或独立部署本仓库前，应先发布 `@cqaiclub/cqai-account-sdk`，再把 `apps/server/package.json` 中的本地 `file:` 依赖替换成正式版本号。
 
+如果你先按当前仓库结构直接走 GitHub Actions 部署，workflow 会把 `cqai-account-service` 和相邻的 `cqai-account-sdk` 一起同步到服务器上的同级目录，再在服务器里执行 `npm ci && npm run build`。默认重启命令是 `systemctl restart cqai-account-service`，只有你想换成别的重启方式时才需要额外提供 `DEPLOY_COMMAND`。
+
+需要的部署配置是：
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PATH`
+- `DEPLOY_COMMAND`（可选，默认 `systemctl restart cqai-account-service`）
+
 ## Logto 配置
 
 1. 在 Logto 创建 API Resource，例如 `https://account.cqaiclub.asia`。

@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_COMMAND: ${{ secrets.DEPLOY_COMMAND || 'systemctl restart cqai-account-service' }}
+
+    steps:
+      - name: Validate deployment settings
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_PORT"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_PATH"
+
+      - name: Checkout account service
+        uses: actions/checkout@v4
+        with:
+          path: cqai-account-service
+
+      - name: Checkout account SDK
+        uses: actions/checkout@v4
+        with:
+          repository: cqai-club/cqai-account-sdk
+          path: cqai-account-sdk
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Trust deploy host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Prepare remote directories
+        run: |
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$DEPLOY_PATH/cqai-account-service' '$DEPLOY_PATH/cqai-account-sdk'"
+
+      - name: Sync source
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude 'dist/' \
+            --exclude '*/dist/' \
+            --exclude '.tsbuildinfo' \
+            ./cqai-account-service/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-service/"
+
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude 'dist/' \
+            --exclude '*/dist/' \
+            --exclude '.tsbuildinfo' \
+            ./cqai-account-sdk/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-sdk/"
+
+      - name: Install, build, and restart
+        run: |
+          remote_command="cd '${DEPLOY_PATH}/cqai-account-service' && npm ci && npm run build && ${DEPLOY_COMMAND}"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -lc "$(printf '%q' "$remote_command")"
