@@ -25,6 +25,11 @@ jobs:
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_COMMAND: ${{ secrets.DEPLOY_COMMAND || 'systemctl restart cqai-account-service' }}
+      LOGTO_ISSUER: ${{ vars.LOGTO_ISSUER }}
+      LOGTO_AUDIENCE: ${{ vars.LOGTO_AUDIENCE }}
+      LOGTO_ADMIN_CLIENT_ID: ${{ vars.LOGTO_ADMIN_CLIENT_ID }}
+      LOGTO_ADMIN_REDIRECT_URI: ${{ vars.LOGTO_ADMIN_REDIRECT_URI }}
+      NEW_API_BASE_URL: ${{ vars.NEW_API_BASE_URL }}
 
     steps:
       - name: Validate deployment settings
@@ -33,6 +38,10 @@ jobs:
           test -n "$DEPLOY_PORT"
           test -n "$DEPLOY_USER"
           test -n "$DEPLOY_PATH"
+          test -n "$LOGTO_ISSUER"
+          test -n "$LOGTO_AUDIENCE"
+          test -n "$LOGTO_ADMIN_CLIENT_ID"
+          test -n "$LOGTO_ADMIN_REDIRECT_URI"
 
       - name: Checkout account service
         uses: actions/checkout@v4
@@ -61,11 +70,31 @@ jobs:
             --exclude '.github' \
             --exclude 'node_modules' \
             --exclude '.env' \
+            --exclude '.env.actions' \
             --exclude 'dist/' \
             --exclude '*/dist/' \
             --exclude '.tsbuildinfo' \
             ./cqai-account-service/ \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-service/"
+
+      - name: Sync public runtime configuration
+        run: |
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE LOGTO_ADMIN_CLIENT_ID LOGTO_ADMIN_REDIRECT_URI NEW_API_BASE_URL; do
+            value="${!name}"
+            if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+              echo "$name must be a single-line value" >&2
+              exit 1
+            fi
+          done
+
+          {
+            printf 'LOGTO_ISSUER=%s\n' "$LOGTO_ISSUER"
+            printf 'LOGTO_AUDIENCE=%s\n' "$LOGTO_AUDIENCE"
+            printf 'LOGTO_ADMIN_CLIENT_ID=%s\n' "$LOGTO_ADMIN_CLIENT_ID"
+            printf 'LOGTO_ADMIN_REDIRECT_URI=%s\n' "$LOGTO_ADMIN_REDIRECT_URI"
+            printf 'NEW_API_BASE_URL=%s\n' "$NEW_API_BASE_URL"
+          } | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "install -m 600 /dev/stdin '$DEPLOY_PATH/cqai-account-service/apps/server/.env.actions'"
 
       - name: Install, build, and restart
         run: |
