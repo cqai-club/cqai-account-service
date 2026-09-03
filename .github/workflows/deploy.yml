@@ -39,13 +39,6 @@ jobs:
         with:
           path: cqai-account-service
 
-      - name: Checkout account SDK
-        uses: actions/checkout@v4
-        with:
-          repository: cqai-club/cqai-account-sdk
-          token: ${{ secrets.CQAI_ACCOUNT_SDK_TOKEN }}
-          path: cqai-account-sdk
-
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -59,7 +52,7 @@ jobs:
       - name: Prepare remote directories
         run: |
           ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "mkdir -p '$DEPLOY_PATH/cqai-account-service' '$DEPLOY_PATH/cqai-account-sdk'"
+            "mkdir -p '$DEPLOY_PATH/cqai-account-service'"
 
       - name: Sync source
         run: |
@@ -73,16 +66,6 @@ jobs:
             --exclude '.tsbuildinfo' \
             ./cqai-account-service/ \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-service/"
-
-          rsync -az --delete \
-            --exclude '.git' \
-            --exclude 'node_modules' \
-            --exclude '.env' \
-            --exclude 'dist/' \
-            --exclude '*/dist/' \
-            --exclude '.tsbuildinfo' \
-            ./cqai-account-sdk/ \
-            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-sdk/"
 
       - name: Install, build, and restart
         run: |

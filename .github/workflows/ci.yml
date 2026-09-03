@@ -22,16 +22,6 @@ jobs:
       - name: Checkout account service
         uses: actions/checkout@v4
 
-      - name: Checkout account SDK
-        uses: actions/checkout@v4
-        with:
-          repository: cqai-club/cqai-account-sdk
-          token: ${{ secrets.CQAI_ACCOUNT_SDK_TOKEN }}
-          path: cqai-account-sdk
-
-      - name: Link account SDK into the expected sibling path
-        run: ln -sfn "$GITHUB_WORKSPACE/cqai-account-sdk" "$GITHUB_WORKSPACE/../cqai-account-sdk"
-
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:

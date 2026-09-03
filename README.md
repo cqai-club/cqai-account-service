@@ -36,15 +36,7 @@ packages/client-sdk/  面向浏览器应用的轻量 SDK
 
 ## 本地启动
 
-当前 `@cqaiclub/cqai-account-sdk` 尚未发布到 npm，新项目通过相邻目录引用它。先构建 SDK：
-
-```bash
-cd ../cqai-account-sdk
-npm ci
-npm run build
-```
-
-然后启动服务：
+`@cqaiclub/cqai-account-sdk` 已发布到 npm，会随项目依赖自动安装。启动服务：
 
 ```bash
 cd ../cqai-account-service
@@ -64,9 +56,7 @@ python3 -m http.server 4174 -d apps/admin/dist
 
 打开 `http://localhost:4174/`，在页面中填写 Account Service 地址并注入 Logto 管理员 Access Token。完成根目录 `npm run build` 后，服务端也会默认把同一份产物挂在 `http://localhost:8787/admin/`；生产环境可将 `apps/admin/dist` 部署到独立的管理员域名，或由反向代理映射到 `/admin/`。具体接口、OIDC PKCE 登录和 CORS 接入说明见 [apps/admin/README.md](apps/admin/README.md)。
 
-发布或独立部署本仓库前，应先发布 `@cqaiclub/cqai-account-sdk`，再把 `apps/server/package.json` 中的本地 `file:` 依赖替换成正式版本号。
-
-如果你先按当前仓库结构直接走 GitHub Actions 部署，workflow 会把 `cqai-account-service` 和相邻的 `cqai-account-sdk` 一起同步到服务器上的同级目录，再在服务器里执行 `npm ci && npm run build`。默认重启命令是 `systemctl restart cqai-account-service`，只有你想换成别的重启方式时才需要额外提供 `DEPLOY_COMMAND`。
+GitHub Actions 会同步 `cqai-account-service`，在服务器中通过 npm 安装依赖并执行 `npm ci && npm run build`。默认重启命令是 `systemctl restart cqai-account-service`，只有你想换成别的重启方式时才需要额外提供 `DEPLOY_COMMAND`。
 
 需要的部署配置是：
 
@@ -75,10 +65,7 @@ python3 -m http.server 4174 -d apps/admin/dist
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PATH`
-- `CQAI_ACCOUNT_SDK_TOKEN`（读取私有 `cqai-account-sdk` 仓库的 GitHub token）
 - `DEPLOY_COMMAND`（可选，默认 `systemctl restart cqai-account-service`）
-
-`CQAI_ACCOUNT_SDK_TOKEN` 建议使用 GitHub fine-grained personal access token，只授予 `cqai-club/cqai-account-sdk` 的只读 Contents 权限。如果后续把 `@cqaiclub/cqai-account-sdk` 发布到 npm，就可以移除这个 token 和第二次 checkout。
 
 ## Logto 配置
 
