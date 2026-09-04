@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { NewApiAccountResolver } from '../src/accounts.js'
+import { MemoryAccountCache } from '../src/cache.js'
 import { ServiceError } from '../src/errors.js'
 import type { VerifiedIdentity } from '../src/types.js'
 import { AiAccountError } from '@cqaiclub/cqai-account-sdk'
@@ -24,26 +25,47 @@ const identity: VerifiedIdentity = {
 test('provisions once and keeps the NewAPI key only in the resolved server account', async () => {
   let calls = 0
   let receivedIdempotencyKey = ''
-  const resolver = new NewApiAccountResolver(config, {
-    async provision(request, options) {
-      calls += 1
-      assert.deepEqual(request, {
-        issuer: identity.issuer,
-        subject: identity.subject,
-        platform: identity.platform,
-        email: identity.email,
-      })
-      receivedIdempotencyKey = options?.idempotencyKey ?? ''
-      return { userId: 42, tokenId: 7, apiKey: 'sk-secret' }
+  const resolver = new NewApiAccountResolver(
+    config,
+    {
+      async provision(request, options) {
+        calls += 1
+        assert.deepEqual(request, {
+          issuer: identity.issuer,
+          subject: identity.subject,
+          platform: identity.platform,
+          email: identity.email,
+        })
+        receivedIdempotencyKey = options?.idempotencyKey ?? ''
+        return { userId: 42, tokenId: 7, apiKey: 'sk-secret' }
+      },
     },
-  })
+    new MemoryAccountCache(),
+  )
 
   const first = await resolver.resolve(identity)
   const second = await resolver.resolve(identity)
   assert.equal(calls, 1)
-  assert.equal(first, second)
+  assert.deepEqual(first, second)
   assert.equal(first.apiKey, 'sk-secret')
   assert.match(receivedIdempotencyKey, /^account-[a-f0-9]{64}$/)
+})
+
+test('falls back to provisioning when the cache is disabled', async () => {
+  let calls = 0
+  const resolver = new NewApiAccountResolver(
+    { ...config, accountCacheTtlMs: 0 },
+    {
+      async provision() {
+        calls += 1
+        return { userId: 42, tokenId: 7, apiKey: 'sk-secret' }
+      },
+    },
+    new MemoryAccountCache(),
+  )
+  await resolver.resolve(identity)
+  await resolver.resolve(identity)
+  assert.equal(calls, 2)
 })
 
 test('fails closed when provisioning does not return a relay key', async () => {

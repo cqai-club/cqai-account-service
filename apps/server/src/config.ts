@@ -8,37 +8,27 @@ export interface ServiceConfig {
   logtoJwksUri: string
   logtoRequiredScopes: readonly string[]
   logtoClientPlatforms: ReadonlyMap<string, string>
-  /** Public SPA client metadata used by the standalone admin UI. */
-  logtoAdminClientId?: string
-  logtoAdminRedirectUri?: string
   newApiBaseUrl: string
   newApiInternalToken: string
+  /** Optional Redis connection URL. Empty means in-memory caching only. */
+  redisUrl: string
   accountCacheTtlMs: number
   maxRequestBodyBytes: number
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServiceConfig {
   const logtoIssuer = requiredUrl(env.LOGTO_ISSUER, 'LOGTO_ISSUER')
-  const adminClientId = optionalString(env.LOGTO_ADMIN_CLIENT_ID)
-  const adminRedirectUri = optionalRedirectUri(env.LOGTO_ADMIN_REDIRECT_URI)
   return {
     port: positiveInteger(env.PORT ?? '8787', 'PORT'),
-    // These values may be initialized from the admin console after startup.
-    // Empty bootstrap values fail closed: same-origin requests still work,
-    // while cross-origin calls and unmapped customer clients are rejected.
     corsAllowedOrigins: parseOrigins(env.CORS_ALLOWED_ORIGINS ?? ''),
     logtoIssuer,
     logtoAudience: required(env.LOGTO_AUDIENCE, 'LOGTO_AUDIENCE'),
     logtoJwksUri: requiredUrl(env.LOGTO_JWKS_URI ?? `${logtoIssuer}/jwks`, 'LOGTO_JWKS_URI'),
     logtoRequiredScopes: parseRequiredList(env.LOGTO_REQUIRED_SCOPES ?? 'ai:invoke', 'LOGTO_REQUIRED_SCOPES'),
     logtoClientPlatforms: parseClientPlatforms(env.LOGTO_CLIENT_PLATFORM_MAP ?? '{}'),
-    ...(adminClientId ? { logtoAdminClientId: adminClientId } : {}),
-    ...(adminRedirectUri ? { logtoAdminRedirectUri: adminRedirectUri } : {}),
-    // The service token is server-only. Allow an empty bootstrap value so the
-    // admin UI can start, while business requests fail closed until a token is
-    // supplied through the environment or a Secret Manager.
     newApiBaseUrl: optionalUrl(env.NEW_API_BASE_URL, 'NEW_API_BASE_URL'),
     newApiInternalToken: optionalString(env.NEW_API_INTERNAL_TOKEN) ?? '',
+    redisUrl: optionalRedisUrl(env.REDIS_URL),
     accountCacheTtlMs: nonNegativeInteger(env.ACCOUNT_CACHE_TTL_SECONDS ?? '300', 'ACCOUNT_CACHE_TTL_SECONDS') * 1000,
     maxRequestBodyBytes: positiveInteger(env.MAX_REQUEST_BODY_BYTES ?? '20971520', 'MAX_REQUEST_BODY_BYTES'),
   }
@@ -47,25 +37,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServiceConfig 
 function optionalString(value: string | undefined): string | undefined {
   const normalized = value?.trim()
   return normalized || undefined
-}
-
-function optionalRedirectUri(value: string | undefined): string | undefined {
-  const raw = optionalString(value)
-  if (!raw) return undefined
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new ServiceError('LOGTO_ADMIN_REDIRECT_URI must be an absolute URL', 500, 'CONFIG_INVALID')
-  }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
-    throw new ServiceError(
-      'LOGTO_ADMIN_REDIRECT_URI must be an HTTP(S) URL without credentials or hash',
-      500,
-      'CONFIG_INVALID',
-    )
-  }
-  return url.toString()
 }
 
 function required(value: string | undefined, name: string): string {
@@ -92,6 +63,21 @@ function optionalUrl(value: string | undefined, name: string): string {
   const raw = optionalString(value)
   if (!raw) return ''
   return requiredUrl(raw, name)
+}
+
+function optionalRedisUrl(value: string | undefined): string {
+  const raw = optionalString(value)
+  if (!raw) return ''
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new ServiceError('REDIS_URL must be a valid redis:// or rediss:// URL', 500, 'CONFIG_INVALID')
+  }
+  if (!['redis:', 'rediss:'].includes(url.protocol) || !url.hostname || url.search || url.hash) {
+    throw new ServiceError('REDIS_URL must be a redis:// or rediss:// URL', 500, 'CONFIG_INVALID')
+  }
+  return url.toString()
 }
 
 function positiveInteger(value: string, name: string): number {

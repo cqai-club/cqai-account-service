@@ -28,9 +28,13 @@ jobs:
       NEW_API_INTERNAL_TOKEN: ${{ secrets.NEW_API_INTERNAL_TOKEN }}
       LOGTO_ISSUER: ${{ vars.LOGTO_ISSUER }}
       LOGTO_AUDIENCE: ${{ vars.LOGTO_AUDIENCE }}
-      LOGTO_ADMIN_CLIENT_ID: ${{ vars.LOGTO_ADMIN_CLIENT_ID }}
-      LOGTO_ADMIN_REDIRECT_URI: ${{ vars.LOGTO_ADMIN_REDIRECT_URI }}
       NEW_API_BASE_URL: ${{ vars.NEW_API_BASE_URL }}
+      CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+      LOGTO_CLIENT_PLATFORM_MAP: ${{ vars.LOGTO_CLIENT_PLATFORM_MAP }}
+      LOGTO_REQUIRED_SCOPES: ${{ vars.LOGTO_REQUIRED_SCOPES || 'ai:invoke' }}
+      ACCOUNT_CACHE_TTL_SECONDS: ${{ vars.ACCOUNT_CACHE_TTL_SECONDS || '300' }}
+      MAX_REQUEST_BODY_BYTES: ${{ vars.MAX_REQUEST_BODY_BYTES || '20971520' }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
 
     steps:
       - name: Validate deployment settings
@@ -41,8 +45,11 @@ jobs:
           test -n "$DEPLOY_PATH"
           test -n "$LOGTO_ISSUER"
           test -n "$LOGTO_AUDIENCE"
-          test -n "$LOGTO_ADMIN_CLIENT_ID"
-          test -n "$LOGTO_ADMIN_REDIRECT_URI"
+          test -n "$CORS_ALLOWED_ORIGINS"
+          test -n "$LOGTO_CLIENT_PLATFORM_MAP"
+          test -n "$LOGTO_REQUIRED_SCOPES"
+          test -n "$ACCOUNT_CACHE_TTL_SECONDS"
+          test -n "$MAX_REQUEST_BODY_BYTES"
           test -n "$NEW_API_INTERNAL_TOKEN"
 
       - name: Checkout account service
@@ -81,7 +88,7 @@ jobs:
 
       - name: Sync runtime configuration
         run: |
-          for name in LOGTO_ISSUER LOGTO_AUDIENCE LOGTO_ADMIN_CLIENT_ID LOGTO_ADMIN_REDIRECT_URI NEW_API_BASE_URL NEW_API_INTERNAL_TOKEN; do
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN; do
             value="${!name}"
             if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
               echo "$name must be a single-line value" >&2
@@ -92,10 +99,16 @@ jobs:
           {
             printf 'LOGTO_ISSUER=%s\n' "$LOGTO_ISSUER"
             printf 'LOGTO_AUDIENCE=%s\n' "$LOGTO_AUDIENCE"
-            printf 'LOGTO_ADMIN_CLIENT_ID=%s\n' "$LOGTO_ADMIN_CLIENT_ID"
-            printf 'LOGTO_ADMIN_REDIRECT_URI=%s\n' "$LOGTO_ADMIN_REDIRECT_URI"
             printf 'NEW_API_BASE_URL=%s\n' "$NEW_API_BASE_URL"
+            printf 'CORS_ALLOWED_ORIGINS=%s\n' "$CORS_ALLOWED_ORIGINS"
+            printf 'LOGTO_CLIENT_PLATFORM_MAP=%s\n' "$LOGTO_CLIENT_PLATFORM_MAP"
+            printf 'LOGTO_REQUIRED_SCOPES=%s\n' "$LOGTO_REQUIRED_SCOPES"
+            printf 'ACCOUNT_CACHE_TTL_SECONDS=%s\n' "$ACCOUNT_CACHE_TTL_SECONDS"
+            printf 'MAX_REQUEST_BODY_BYTES=%s\n' "$MAX_REQUEST_BODY_BYTES"
             printf 'NEW_API_INTERNAL_TOKEN=%s\n' "$NEW_API_INTERNAL_TOKEN"
+            if [[ -n "$REDIS_URL" ]]; then
+              printf 'REDIS_URL=%s\n' "$REDIS_URL"
+            fi
           } | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "install -m 600 /dev/stdin '$DEPLOY_PATH/cqai-account-service/apps/server/.env.actions'"
 

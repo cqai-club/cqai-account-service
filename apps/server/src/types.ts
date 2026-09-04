@@ -33,21 +33,10 @@ export interface TokenVerifier {
 
 /**
  * Optional per-route authorization constraints. The default verifier policy is
- * still applied when `requiredScopes` is omitted; administrative routes pass
- * their own scope set so that normal AI permissions do not implicitly grant
- * configuration access.
+ * still applied when `requiredScopes` is omitted.
  */
 export interface TokenVerificationOptions {
   requiredScopes?: readonly string[]
-  /** Marks a control-plane request whose identity is authorized by scope. */
-  adminRoute?: boolean
-}
-
-/** Runtime configuration control-plane contract used by the HTTP layer. */
-export interface RuntimeConfigProvider {
-  getConfig(): ServiceConfig
-  getPublicConfig(): unknown
-  update(patch: unknown, expectedVersion?: number): Promise<unknown>
 }
 
 export interface AccountResolver {
