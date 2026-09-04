@@ -28,11 +28,12 @@ test('allows minimal bootstrap without dynamic CORS or client mappings', () => {
   assert.deepEqual(config.logtoRequiredScopes, ['ai:invoke'])
 })
 
-test('allows NewAPI settings to be configured later from the admin page', () => {
+test('allows NewAPI settings to remain empty only when deployment can provision them', () => {
   const { NEW_API_BASE_URL: _baseUrl, NEW_API_INTERNAL_TOKEN: _token, ...minimal } = validEnvironment
   const config = loadConfig(minimal)
   assert.equal(config.newApiBaseUrl, '')
   assert.equal(config.newApiInternalToken, '')
+  assert.equal(config.redisUrl, '')
 })
 
 test('rejects wildcard CORS configuration', () => {
@@ -47,6 +48,15 @@ test('rejects malformed client mappings', () => {
     () => loadConfig({ ...validEnvironment, LOGTO_CLIENT_PLATFORM_MAP: 'client-1=lingweave' }),
     /must be a JSON object/,
   )
+})
+
+test('accepts only redis or rediss URLs', () => {
+  assert.throws(
+    () => loadConfig({ ...validEnvironment, REDIS_URL: 'http://redis.example.com' }),
+    /REDIS_URL must be a redis:\/\/ or rediss:\/\/ URL/,
+  )
+  const config = loadConfig({ ...validEnvironment, REDIS_URL: 'redis://:password@127.0.0.1:6380/0' })
+  assert.equal(config.redisUrl, 'redis://:password@127.0.0.1:6380/0')
 })
 
 test('requires at least one authorization scope', () => {

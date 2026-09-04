@@ -23,6 +23,7 @@ const config: ServiceConfig = {
   logtoClientPlatforms: new Map([['client-1', 'lingweave']]),
   newApiBaseUrl: 'https://new-api.example.com',
   newApiInternalToken: 'internal-secret',
+  redisUrl: '',
   accountCacheTtlMs: 0,
   maxRequestBodyBytes: 1024,
 }

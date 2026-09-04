@@ -2,16 +2,10 @@ import { createHash } from 'node:crypto'
 
 import { AiAccountError, NewApiClient } from '@cqaiclub/cqai-account-sdk'
 
+import type { AccountCache } from './cache.js'
 import type { ServiceConfig } from './config.js'
 import { ServiceError } from './errors.js'
-import type { RuntimeConfigStore } from './runtime-config.js'
 import type { AccountResolver, ResolvedAccount, VerifiedIdentity } from './types.js'
-
-interface CacheEntry {
-  createdAt: number
-  expiresAt: number
-  account: ResolvedAccount
-}
 
 type NewApiProvisioner = Pick<NewApiClient, 'provision'>
 type AccountResolverConfig = Pick<
@@ -21,43 +15,28 @@ type AccountResolverConfig = Pick<
 
 export class NewApiAccountResolver implements AccountResolver {
   private readonly injectedClient: NewApiProvisioner | undefined
-  private readonly cache = new Map<string, CacheEntry>()
-  private lastCacheTtlMs: number | undefined
-  private lastNewApiBaseUrl: string | undefined
 
   constructor(
     private readonly config: AccountResolverConfig,
     client?: NewApiProvisioner,
-    private readonly runtimeConfig?: Pick<RuntimeConfigStore, 'getSnapshot' | 'getConfig'>,
+    private readonly cache?: AccountCache,
   ) {
     this.injectedClient = client
   }
 
   async resolve(identity: VerifiedIdentity): Promise<ResolvedAccount> {
-    const cacheKey = `${identity.issuer}\u0000${identity.subject}\u0000${identity.platform}`
-    const activeConfig = this.runtimeConfig?.getConfig?.() ?? this.config
-    if (!activeConfig.newApiBaseUrl || !activeConfig.newApiInternalToken) {
+    if (!this.config.newApiBaseUrl || !this.config.newApiInternalToken) {
       throw new ServiceError('NewAPI is not configured', 503, 'NEW_API_NOT_CONFIGURED')
     }
+
+    const cacheKey = `${identity.issuer}\u0000${identity.subject}\u0000${identity.platform}`
+    const cached = await this.cache?.get(cacheKey)
+    if (this.config.accountCacheTtlMs > 0 && cached) return cached
+
     const client = this.injectedClient ?? new NewApiClient({
-      baseUrl: activeConfig.newApiBaseUrl,
-      serviceToken: activeConfig.newApiInternalToken,
+      baseUrl: this.config.newApiBaseUrl,
+      serviceToken: this.config.newApiInternalToken,
     })
-    const accountCacheTtlMs = activeConfig.accountCacheTtlMs
-    if ((this.lastCacheTtlMs !== undefined && this.lastCacheTtlMs !== accountCacheTtlMs)
-      || (this.lastNewApiBaseUrl !== undefined && this.lastNewApiBaseUrl !== activeConfig.newApiBaseUrl)) {
-      // Do not retain keys under an obsolete cache policy after an admin
-      // changes the TTL (including disabling the cache).
-      this.cache.clear()
-    }
-    this.lastCacheTtlMs = accountCacheTtlMs
-    this.lastNewApiBaseUrl = activeConfig.newApiBaseUrl
-    const cached = this.cache.get(cacheKey)
-    const now = Date.now()
-    if (accountCacheTtlMs > 0 && cached && cached.createdAt + accountCacheTtlMs > now && cached.expiresAt > now) {
-      return cached.account
-    }
-    if (accountCacheTtlMs <= 0) this.cache.delete(cacheKey)
 
     try {
       const binding = await client.provision(
@@ -82,11 +61,7 @@ export class NewApiAccountResolver implements AccountResolver {
         ...(binding.quota === undefined ? {} : { quota: binding.quota }),
         ...(binding.quotaUsed === undefined ? {} : { quotaUsed: binding.quotaUsed }),
       }
-      if (accountCacheTtlMs > 0) {
-        if (this.cache.size >= 10_000) this.removeExpiredEntries()
-        const createdAt = Date.now()
-        this.cache.set(cacheKey, { account, createdAt, expiresAt: createdAt + accountCacheTtlMs })
-      }
+      await this.cache?.set(cacheKey, account, this.config.accountCacheTtlMs)
       return account
     } catch (error) {
       if (error instanceof ServiceError) throw error
@@ -95,14 +70,6 @@ export class NewApiAccountResolver implements AccountResolver {
       }
       throw new ServiceError('NewAPI account provisioning failed', 502, 'NEW_API_PROVISION_FAILED')
     }
-  }
-
-  private removeExpiredEntries(): void {
-    const now = Date.now()
-    for (const [key, entry] of this.cache) {
-      if (entry.expiresAt <= now) this.cache.delete(key)
-    }
-    if (this.cache.size >= 10_000) this.cache.clear()
   }
 }
 
