@@ -25,6 +25,7 @@ jobs:
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_COMMAND: ${{ secrets.DEPLOY_COMMAND || 'systemctl restart cqai-account-service' }}
+      NEW_API_INTERNAL_TOKEN: ${{ secrets.NEW_API_INTERNAL_TOKEN }}
       LOGTO_ISSUER: ${{ vars.LOGTO_ISSUER }}
       LOGTO_AUDIENCE: ${{ vars.LOGTO_AUDIENCE }}
       LOGTO_ADMIN_CLIENT_ID: ${{ vars.LOGTO_ADMIN_CLIENT_ID }}
@@ -42,6 +43,7 @@ jobs:
           test -n "$LOGTO_AUDIENCE"
           test -n "$LOGTO_ADMIN_CLIENT_ID"
           test -n "$LOGTO_ADMIN_REDIRECT_URI"
+          test -n "$NEW_API_INTERNAL_TOKEN"
 
       - name: Checkout account service
         uses: actions/checkout@v4
@@ -77,9 +79,9 @@ jobs:
             ./cqai-account-service/ \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-service/"
 
-      - name: Sync public runtime configuration
+      - name: Sync runtime configuration
         run: |
-          for name in LOGTO_ISSUER LOGTO_AUDIENCE LOGTO_ADMIN_CLIENT_ID LOGTO_ADMIN_REDIRECT_URI NEW_API_BASE_URL; do
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE LOGTO_ADMIN_CLIENT_ID LOGTO_ADMIN_REDIRECT_URI NEW_API_BASE_URL NEW_API_INTERNAL_TOKEN; do
             value="${!name}"
             if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
               echo "$name must be a single-line value" >&2
@@ -93,6 +95,7 @@ jobs:
             printf 'LOGTO_ADMIN_CLIENT_ID=%s\n' "$LOGTO_ADMIN_CLIENT_ID"
             printf 'LOGTO_ADMIN_REDIRECT_URI=%s\n' "$LOGTO_ADMIN_REDIRECT_URI"
             printf 'NEW_API_BASE_URL=%s\n' "$NEW_API_BASE_URL"
+            printf 'NEW_API_INTERNAL_TOKEN=%s\n' "$NEW_API_INTERNAL_TOKEN"
           } | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "install -m 600 /dev/stdin '$DEPLOY_PATH/cqai-account-service/apps/server/.env.actions'"
 
