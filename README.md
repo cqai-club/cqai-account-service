@@ -59,8 +59,9 @@ python3 -m http.server 4174 -d apps/admin/dist
 GitHub Actions 会同步 `cqai-account-service`，在服务器中通过 npm 安装依赖并执行 `npm ci && npm run build`。默认重启命令是 `systemctl restart cqai-account-service`，只有你想换成别的重启方式时才需要额外提供 `DEPLOY_COMMAND`。
 
 部署工作流会将 GitHub Actions Repository Variables 中的公开运行配置写入服务器的
-`apps/server/.env.actions`，启动时它会覆盖 `.env` 中的同名公开配置。服务端密钥不得放在
-Repository Variables 或 `.env.actions` 中，仍应只通过服务器 `.env` 或 Secret Manager 提供。
+`apps/server/.env.actions`，并从 GitHub Actions Secret 读取 `NEW_API_INTERNAL_TOKEN` 写入同一文件。
+该文件权限为 `0600`、不会提交到 Git，启动时会覆盖 `.env` 中的同名旧值。
+`NEW_API_INTERNAL_TOKEN` 不得放在 Repository Variables 中。
 
 需要的部署配置是：
 
@@ -70,6 +71,7 @@ Repository Variables 或 `.env.actions` 中，仍应只通过服务器 `.env` �
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PATH`
 - `DEPLOY_COMMAND`（可选，默认 `systemctl restart cqai-account-service`）
+- `NEW_API_INTERNAL_TOKEN`（必填，使用 Relay 管理页生成并保存的同一个 Token）
 
 Repository Variables 至少需要配置 `LOGTO_ISSUER`、`LOGTO_AUDIENCE`、
 `LOGTO_ADMIN_CLIENT_ID` 和 `LOGTO_ADMIN_REDIRECT_URI`；`NEW_API_BASE_URL` 可选。
