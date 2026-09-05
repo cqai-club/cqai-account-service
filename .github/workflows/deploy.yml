@@ -32,6 +32,8 @@ jobs:
       CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
       LOGTO_CLIENT_PLATFORM_MAP: ${{ vars.LOGTO_CLIENT_PLATFORM_MAP }}
       LOGTO_REQUIRED_SCOPES: ${{ vars.LOGTO_REQUIRED_SCOPES || 'ai:invoke' }}
+      LOGTO_ROLE_CLAIM: ${{ vars.LOGTO_ROLE_CLAIM || 'roles' }}
+      LOGTO_ROLE_MAP: ${{ vars.LOGTO_ROLE_MAP || '{}' }}
       ACCOUNT_CACHE_TTL_SECONDS: ${{ vars.ACCOUNT_CACHE_TTL_SECONDS || '300' }}
       MAX_REQUEST_BODY_BYTES: ${{ vars.MAX_REQUEST_BODY_BYTES || '20971520' }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
@@ -48,6 +50,8 @@ jobs:
           test -n "$CORS_ALLOWED_ORIGINS"
           test -n "$LOGTO_CLIENT_PLATFORM_MAP"
           test -n "$LOGTO_REQUIRED_SCOPES"
+          test -n "$LOGTO_ROLE_CLAIM"
+          test -n "$LOGTO_ROLE_MAP"
           test -n "$ACCOUNT_CACHE_TTL_SECONDS"
           test -n "$MAX_REQUEST_BODY_BYTES"
           test -n "$NEW_API_INTERNAL_TOKEN"
@@ -88,7 +92,7 @@ jobs:
 
       - name: Sync runtime configuration
         run: |
-          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN; do
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ROLE_CLAIM LOGTO_ROLE_MAP ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN; do
             value="${!name}"
             if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
               echo "$name must be a single-line value" >&2
@@ -103,6 +107,8 @@ jobs:
             printf 'CORS_ALLOWED_ORIGINS=%s\n' "$CORS_ALLOWED_ORIGINS"
             printf 'LOGTO_CLIENT_PLATFORM_MAP=%s\n' "$LOGTO_CLIENT_PLATFORM_MAP"
             printf 'LOGTO_REQUIRED_SCOPES=%s\n' "$LOGTO_REQUIRED_SCOPES"
+            printf 'LOGTO_ROLE_CLAIM=%s\n' "$LOGTO_ROLE_CLAIM"
+            printf 'LOGTO_ROLE_MAP=%s\n' "$LOGTO_ROLE_MAP"
             printf 'ACCOUNT_CACHE_TTL_SECONDS=%s\n' "$ACCOUNT_CACHE_TTL_SECONDS"
             printf 'MAX_REQUEST_BODY_BYTES=%s\n' "$MAX_REQUEST_BODY_BYTES"
             printf 'NEW_API_INTERNAL_TOKEN=%s\n' "$NEW_API_INTERNAL_TOKEN"
