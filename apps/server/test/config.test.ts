@@ -8,6 +8,8 @@ const validEnvironment: NodeJS.ProcessEnv = {
   LOGTO_ISSUER: 'https://auth.example.com/oidc',
   LOGTO_AUDIENCE: 'https://account.example.com',
   LOGTO_CLIENT_PLATFORM_MAP: '{"client-1":"lingweave"}',
+  LOGTO_ROLE_CLAIM: 'roles',
+  LOGTO_ROLE_MAP: '{"super_admin":100,"admin":10}',
   NEW_API_BASE_URL: 'https://new-api.example.com',
   NEW_API_INTERNAL_TOKEN: 'secret',
 }
@@ -40,6 +42,20 @@ test('rejects wildcard CORS configuration', () => {
   assert.throws(
     () => loadConfig({ ...validEnvironment, CORS_ALLOWED_ORIGINS: '*' }),
     /must not contain \*/,
+  )
+})
+
+test('parses Logto role mapping and rejects unsafe values', () => {
+  const config = loadConfig(validEnvironment)
+  assert.equal(config.logtoRoleClaim, 'roles')
+  assert.deepEqual([...config.logtoRoleMap], [['super_admin', 100], ['admin', 10]])
+  assert.throws(
+    () => loadConfig({ ...validEnvironment, LOGTO_ROLE_MAP: '{"admin":999}' }),
+    /LOGTO_ROLE_MAP role values must be NewAPI roles/,
+  )
+  assert.throws(
+    () => loadConfig({ ...validEnvironment, LOGTO_ROLE_MAP: 'admin=10' }),
+    /LOGTO_ROLE_MAP must be a JSON object/,
   )
 })
 

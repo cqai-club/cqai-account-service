@@ -20,6 +20,8 @@ async function fixture() {
     logtoJwksUri: `${issuer}/jwks`,
     logtoRequiredScopes: ['ai:invoke'],
     logtoClientPlatforms: new Map([['client-1', 'lingweave']]),
+    logtoRoleClaim: 'roles',
+    logtoRoleMap: new Map([['super_admin', 100], ['admin', 10]]),
   }
   const verifier = new LogtoTokenVerifier(
     config,
@@ -57,6 +59,20 @@ test('accepts a valid Logto API access token and maps its client', async () => {
     email: 'user@example.com',
     name: 'User',
   })
+})
+
+test('maps Logto roles to NewAPI roles with highest privilege winning', async () => {
+  const { verifier, sign } = await fixture()
+  const identity = await verifier.verify(
+    await sign({ roles: ['user', 'admin', 'super_admin'] })
+  )
+  assert.equal(identity.role, 100)
+})
+
+test('ignores unmapped role claims and never elevates the user', async () => {
+  const { verifier, sign } = await fixture()
+  const identity = await verifier.verify(await sign({ roles: ['user', 'owner'] }))
+  assert.equal(identity.role, undefined)
 })
 
 test('rejects tokens without the required scope', async () => {

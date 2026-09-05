@@ -21,6 +21,8 @@ const config: ServiceConfig = {
   logtoJwksUri: 'https://auth.example.com/oidc/jwks',
   logtoRequiredScopes: ['ai:invoke'],
   logtoClientPlatforms: new Map([['client-1', 'lingweave']]),
+  logtoRoleClaim: 'roles',
+  logtoRoleMap: new Map([['admin', 10]]),
   newApiBaseUrl: 'https://new-api.example.com',
   newApiInternalToken: 'internal-secret',
   redisUrl: '',

@@ -20,6 +20,7 @@ const identity: VerifiedIdentity = {
   platform: 'lingweave',
   scopes: ['ai:invoke'],
   email: 'user@example.com',
+  role: 10,
 }
 
 test('provisions once and keeps the NewAPI key only in the resolved server account', async () => {
@@ -35,6 +36,7 @@ test('provisions once and keeps the NewAPI key only in the resolved server accou
           subject: identity.subject,
           platform: identity.platform,
           email: identity.email,
+          role: identity.role,
         })
         receivedIdempotencyKey = options?.idempotencyKey ?? ''
         return { userId: 42, tokenId: 7, apiKey: 'sk-secret' }

@@ -46,6 +46,7 @@ export class NewApiAccountResolver implements AccountResolver {
           platform: identity.platform,
           ...(identity.email ? { email: identity.email } : {}),
           ...(identity.name ? { name: identity.name } : {}),
+          ...(identity.role === undefined ? {} : { role: identity.role }),
         },
         { idempotencyKey: idempotencyKey(cacheKey) },
       )

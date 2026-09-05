@@ -13,6 +13,8 @@ interface LogtoPayload extends JWTPayload {
   email?: unknown
   name?: unknown
   username?: unknown
+  roles?: unknown
+  role?: unknown
 }
 
 type LogtoVerifierConfig = Pick<
@@ -22,6 +24,8 @@ type LogtoVerifierConfig = Pick<
   | 'logtoJwksUri'
   | 'logtoRequiredScopes'
   | 'logtoClientPlatforms'
+  | 'logtoRoleClaim'
+  | 'logtoRoleMap'
 >
 
 export class LogtoTokenVerifier implements TokenVerifier {
@@ -93,6 +97,7 @@ function verifiedIdentity(
   const platform = config.logtoClientPlatforms.get(clientId)
   if (!platform) throw new ServiceError('Application is not allowed', 403, 'AUTH_CLIENT_FORBIDDEN')
 
+  const role = resolveRole(payload, config)
   return {
     issuer,
     subject,
@@ -101,7 +106,36 @@ function verifiedIdentity(
     scopes,
     ...(email ? { email } : {}),
     ...(name ? { name } : {}),
+    ...(role === undefined ? {} : { role }),
   }
+}
+
+/**
+ * Resolve a trusted NewAPI role from Logto role claims. mapping is read from
+ * LOGTO_ROLE_MAP; roles without a mapping never elevate privileges. When
+ * multiple roles are claimed, the highest mapped NewAPI role wins and the
+ * root role takes precedence over admin.
+ */
+function resolveRole(payload: LogtoPayload, config: LogtoVerifierConfig): number | undefined {
+  const roles = extractRoleNames(payload[config.logtoRoleClaim])
+  if (roles.length === 0) return undefined
+  let resolved: number | undefined
+  for (const role of roles) {
+    const mapped = config.logtoRoleMap.get(role)
+    if (mapped === undefined) continue
+    resolved = resolved === undefined ? mapped : Math.max(resolved, mapped)
+  }
+  return resolved
+}
+
+function extractRoleNames(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    return [...new Set(raw.split(/[,\s]+/).filter(Boolean))]
+  }
+  return []
 }
 
 function isJwt(token: string): boolean {

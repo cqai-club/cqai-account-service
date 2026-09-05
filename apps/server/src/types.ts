@@ -8,6 +8,11 @@ export interface VerifiedIdentity {
   scopes: string[]
   email?: string
   name?: string
+  /**
+   * NewAPI numeric role resolved from trusted Logto role claims:
+   * 1 common, 10 admin, 100 root. Absent means a normal user.
+   */
+  role?: number
 }
 
 export interface ResolvedAccount {
