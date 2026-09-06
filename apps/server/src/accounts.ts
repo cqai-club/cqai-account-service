@@ -45,6 +45,7 @@ export class NewApiAccountResolver implements AccountResolver {
           subject: identity.subject,
           platform: identity.platform,
           ...(identity.email ? { email: identity.email } : {}),
+          ...(identity.username ? { username: identity.username } : {}),
           ...(identity.name ? { name: identity.name } : {}),
           ...(identity.role === undefined ? {} : { role: identity.role }),
         },

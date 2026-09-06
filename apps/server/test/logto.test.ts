@@ -49,7 +49,7 @@ async function fixture() {
 
 test('accepts a valid Logto API access token and maps its client', async () => {
   const { verifier, sign } = await fixture()
-  const identity = await verifier.verify(await sign({ email: 'user@example.com', name: 'User' }))
+  const identity = await verifier.verify(await sign({ email: 'user@example.com', username: 'logto-user', name: 'User' }))
   assert.deepEqual(identity, {
     issuer,
     subject: 'user-1',
@@ -57,8 +57,16 @@ test('accepts a valid Logto API access token and maps its client', async () => {
     platform: 'lingweave',
     scopes: ['openid', 'ai:invoke'],
     email: 'user@example.com',
+    username: 'logto-user',
     name: 'User',
   })
+})
+
+test('uses the Logto username as the display-name fallback', async () => {
+  const { verifier, sign } = await fixture()
+  const identity = await verifier.verify(await sign({ preferred_username: 'logto-user' }))
+  assert.equal(identity.username, 'logto-user')
+  assert.equal(identity.name, 'logto-user')
 })
 
 test('maps Logto scopes to NewAPI roles with root winning', async () => {

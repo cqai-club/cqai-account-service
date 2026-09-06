@@ -13,6 +13,7 @@ interface LogtoPayload extends JWTPayload {
   email?: unknown
   name?: unknown
   username?: unknown
+  preferred_username?: unknown
 }
 
 type LogtoVerifierConfig = Pick<
@@ -91,7 +92,8 @@ function verifiedIdentity(
   if (missingScope) throw new ServiceError('Required permission is missing', 403, 'AUTH_SCOPE_FORBIDDEN')
 
   const email = stringClaim(payload.email)
-  const name = stringClaim(payload.name) ?? stringClaim(payload.username)
+  const username = stringClaim(payload.username) ?? stringClaim(payload.preferred_username)
+  const name = stringClaim(payload.name) ?? username
   const platform = config.logtoClientPlatforms.get(clientId)
   if (!platform) throw new ServiceError('Application is not allowed', 403, 'AUTH_CLIENT_FORBIDDEN')
 
@@ -103,6 +105,7 @@ function verifiedIdentity(
     platform,
     scopes,
     ...(email ? { email } : {}),
+    ...(username ? { username } : {}),
     ...(name ? { name } : {}),
     ...(role === undefined ? {} : { role }),
   }
