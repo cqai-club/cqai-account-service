@@ -13,8 +13,7 @@ interface LogtoPayload extends JWTPayload {
   email?: unknown
   name?: unknown
   username?: unknown
-  roles?: unknown
-  role?: unknown
+  preferred_username?: unknown
 }
 
 type LogtoVerifierConfig = Pick<
@@ -24,8 +23,8 @@ type LogtoVerifierConfig = Pick<
   | 'logtoJwksUri'
   | 'logtoRequiredScopes'
   | 'logtoClientPlatforms'
-  | 'logtoRoleClaim'
-  | 'logtoRoleMap'
+  | 'logtoAdminScope'
+  | 'logtoRootScope'
 >
 
 export class LogtoTokenVerifier implements TokenVerifier {
@@ -93,11 +92,12 @@ function verifiedIdentity(
   if (missingScope) throw new ServiceError('Required permission is missing', 403, 'AUTH_SCOPE_FORBIDDEN')
 
   const email = stringClaim(payload.email)
-  const name = stringClaim(payload.name) ?? stringClaim(payload.username)
+  const username = stringClaim(payload.username) ?? stringClaim(payload.preferred_username)
+  const name = stringClaim(payload.name) ?? username
   const platform = config.logtoClientPlatforms.get(clientId)
   if (!platform) throw new ServiceError('Application is not allowed', 403, 'AUTH_CLIENT_FORBIDDEN')
 
-  const role = resolveRole(payload, config)
+  const role = resolveRole(scopes, config)
   return {
     issuer,
     subject,
@@ -105,37 +105,21 @@ function verifiedIdentity(
     platform,
     scopes,
     ...(email ? { email } : {}),
+    ...(username ? { username } : {}),
     ...(name ? { name } : {}),
     ...(role === undefined ? {} : { role }),
   }
 }
 
 /**
- * Resolve a trusted NewAPI role from Logto role claims. mapping is read from
- * LOGTO_ROLE_MAP; roles without a mapping never elevate privileges. When
- * multiple roles are claimed, the highest mapped NewAPI role wins and the
- * root role takes precedence over admin.
+ * Resolve a trusted NewAPI role from Logto scopes. The root scope takes
+ * precedence over the admin scope. A token without either scope stays a
+ * regular NewAPI user (no role claim).
  */
-function resolveRole(payload: LogtoPayload, config: LogtoVerifierConfig): number | undefined {
-  const roles = extractRoleNames(payload[config.logtoRoleClaim])
-  if (roles.length === 0) return undefined
-  let resolved: number | undefined
-  for (const role of roles) {
-    const mapped = config.logtoRoleMap.get(role)
-    if (mapped === undefined) continue
-    resolved = resolved === undefined ? mapped : Math.max(resolved, mapped)
-  }
-  return resolved
-}
-
-function extractRoleNames(raw: unknown): string[] {
-  if (Array.isArray(raw)) {
-    return [...new Set(raw.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]
-  }
-  if (typeof raw === 'string' && raw.trim()) {
-    return [...new Set(raw.split(/[,\s]+/).filter(Boolean))]
-  }
-  return []
+function resolveRole(scopes: readonly string[], config: LogtoVerifierConfig): number | undefined {
+  if (scopes.includes(config.logtoRootScope)) return 100
+  if (scopes.includes(config.logtoAdminScope)) return 10
+  return undefined
 }
 
 function isJwt(token: string): boolean {

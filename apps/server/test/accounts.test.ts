@@ -20,6 +20,7 @@ const identity: VerifiedIdentity = {
   platform: 'lingweave',
   scopes: ['ai:invoke'],
   email: 'user@example.com',
+  username: 'logto-user',
   role: 10,
 }
 
@@ -36,6 +37,7 @@ test('provisions once and keeps the NewAPI key only in the resolved server accou
           subject: identity.subject,
           platform: identity.platform,
           email: identity.email,
+          username: identity.username,
           role: identity.role,
         })
         receivedIdempotencyKey = options?.idempotencyKey ?? ''
@@ -94,4 +96,42 @@ test('does not reflect arbitrary upstream error codes in client responses', asyn
       && error.code === 'NEW_API_PROVISION_FAILED'
       && !error.message.includes('upstream details'),
   )
+})
+
+test('uses verified Logto claims without calling the UserInfo endpoint', async () => {
+  let provisionCalls = 0
+  const resolver = new NewApiAccountResolver(
+    { ...config, accountCacheTtlMs: 0 },
+    {
+      async provision(request) {
+        provisionCalls += 1
+        assert.equal(request.username, identity.username)
+        assert.equal(request.name, identity.name)
+        assert.equal(request.email, identity.email)
+        return { userId: 42, tokenId: 7, apiKey: 'sk-secret', userCreated: true }
+      },
+    },
+  )
+
+  await resolver.resolve(identity)
+
+  assert.equal(provisionCalls, 1)
+})
+
+test('reuses an existing NewAPI account without profile synchronization', async () => {
+  let provisionCalls = 0
+  const resolver = new NewApiAccountResolver(
+    { ...config, accountCacheTtlMs: 0 },
+    {
+      async provision() {
+        provisionCalls += 1
+        return { userId: 42, tokenId: 7, apiKey: 'sk-secret', userCreated: false }
+      },
+    },
+  )
+
+  await resolver.resolve({
+    ...identity,
+  })
+  assert.equal(provisionCalls, 1)
 })

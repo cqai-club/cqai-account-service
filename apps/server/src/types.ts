@@ -7,6 +7,7 @@ export interface VerifiedIdentity {
   platform: string
   scopes: string[]
   email?: string
+  username?: string
   name?: string
   /**
    * NewAPI numeric role resolved from trusted Logto role claims:
