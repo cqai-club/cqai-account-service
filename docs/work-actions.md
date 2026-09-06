@@ -6,7 +6,7 @@
 
 ## 一、总体目标
 
-1. **所有登录统一走 Logto**：关闭/移除 Relay（NewAPI）原生登录（含原生 OIDC），登录、注册、权限全部由 Logto + Account Service 桥接承担。
+1. **业务 AI 统一走 Logto + Account Service**：业务应用登录后，将 Logto API Access Token 交给 Account Service，由它桥接 Relay 的账号、Token 和 AI 接口。Relay 原生登录/OIDC 可以继续保留，作为 Relay 管理后台或兼容入口，不纳入本次业务桥接改造。
 2. **账号懒创建**：用户只在 Logto 注册/登录时，NewAPI 不立即建号；首次调用 `/api/account` 或 `/v1/*` 才创建 NewAPI 用户、身份绑定、应用专属 API Key。
 3. **权限用 scope 而不是 role map**：不再使用 `LOGTO_ROLE_MAP`，改为 `LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE`，由管理员在 Logto 中配置角色并赋权。
 4. **配置全部改到 GitHub Actions**：删除 admin 页面（已完成），配置写入 Repository Variables/Secrets，服务启动时写 `.env.actions`（已实现，需验证）。
@@ -34,14 +34,11 @@
 
 ## 三、按优先级待办
 
-### P0 统一入口（relay 侧）
-- [ ] 确认 production 是否还有实例开着 Relay 原生 OIDC / 原生登录入口。
-- [ ] 封住 Relay 原生登录入口：
-  - 后端不再接受 OIDC 注册/绑定/登录：`oauth/oidc.go`、`controller/oauth.go`、`router/api-router.go` 的 `/oauth/oidc` 处理改为禁用/下线（保守做法：`IsEnabled=false` + 返回 403/404）。
-  - 前端不再展示 OIDC 登录按钮：`web/src/features/auth/components/oauth-providers.tsx`、`web/src/features/auth/hooks/use-oauth-login.ts`、`web/src/features/auth/lib/oauth.ts`。
-- [ ] 受保护页面：未登录时跳过 `/sign-in` 页面，直接跳转 Logto 授权页（Account Service 发起的 Authorization Code + PKCE）。
-  - 备选：先走 `/sign-in` 但登录按钮直接指向 Logto；与用户确认是否要"页面直接跳转、不弹 sign-in"（用户倾向直接跳转）。
-- [ ] 验证首次访问受保护页面时能看到 Logto 登录页、回跳后注册/登录成功、首次 `/api/account` 自动建号。
+### P0 统一业务 AI 入口
+- [ ] 确认每个业务应用都使用 Logto API Resource Access Token，并请求 `ai:invoke`。
+- [ ] 确认业务应用只调用 Account Service 的 `/api/account`、`/v1/*`，不直接持有 Relay Service Token 或完整 API Key。
+- [ ] 验证首次访问 `/api/account` 或 `/v1/*` 时自动完成 Relay provisioning。
+- [ ] Relay 原生 OIDC 仅作为管理后台/兼容入口保留，不要求在本次改造中删除或下线。
 
 ### P1 配置持久化（GitHub Actions）
 - [ ] 确认仓库变量里已存在（用户在截图中已确认部分已有）：
@@ -97,14 +94,9 @@
 ### `cqai-relay`（NewAPI）
 | 文件 | 改动 |
 |---|---|
-| `oauth/oidc.go` | 停用原生 OIDC（注册入口也走 Account Service） |
-| `controller/oauth.go` | `/oauth/oidc` 回调处理改为禁用/403 |
-| `router/api-router.go` | 不再暴露原生 OIDC 路由 |
-| `web/src/features/auth/components/oauth-providers.tsx` | 移除 OIDC 登录按钮 |
-| `web/src/features/auth/hooks/use-oauth-login.ts` | 移除 OIDC 处理 |
-| `web/src/features/auth/lib/oauth.ts` | 不再构建 OIDC URL |
-| `web/src/routes/_authenticated/route.tsx` | 未登录直接跳 Logto（已有改动，确认/完善） |
-| 配置/设置 | 关闭 OIDC enabled；或删除 OIDC 配置项 |
+| `controller/account_provision.go` / `service/account_provision.go` | 提供受内部 Token 保护的幂等 provisioning |
+| `model/account_provision.go` | 维护 `(issuer, subject)` 身份和 `(user, platform)` 应用凭证 |
+| Relay 原生 OIDC | 保留为管理后台/兼容入口，不承担业务应用的统一桥接职责 |
 
 ---
 
@@ -115,7 +107,7 @@ cd ../cqai-relay && go test ./... # 或 make test
 ```
 
 ## 六、需要用户确认的决策
-1. 受保护页面登录：直接跳 Logto（不弹 sign-in 页）能否接受？备用登录方式（GitHub/Discord/Telegram 等）是否全部都改为指向 Logto / Account Service？
+1. 业务应用是否都通过 Account Service 调用 AI；Relay 管理后台是否继续保留原生 OIDC 入口？
 2. `LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE` 的确切 scope 字符串是否就是 `account:admin` / `account:root`？
-3. Relay 原生 OIDC 是直接删除还是仅禁用（保留以后复用）？
+3. Relay 原生 OIDC 是否仅作为管理后台入口保留（本次不删除、不下线）？
 4. 是不是所有 n8n/其他 AI 应用都只对接 Account Service 的 `/api/account` 和 `/v1/*`（不碰 relay）？
