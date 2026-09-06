@@ -8,8 +8,8 @@ const validEnvironment: NodeJS.ProcessEnv = {
   LOGTO_ISSUER: 'https://auth.example.com/oidc',
   LOGTO_AUDIENCE: 'https://account.example.com',
   LOGTO_CLIENT_PLATFORM_MAP: '{"client-1":"lingweave"}',
-  LOGTO_ROLE_CLAIM: 'roles',
-  LOGTO_ROLE_MAP: '{"super_admin":100,"admin":10}',
+  LOGTO_ADMIN_SCOPE: 'account:admin',
+  LOGTO_ROOT_SCOPE: 'account:root',
   NEW_API_BASE_URL: 'https://new-api.example.com',
   NEW_API_INTERNAL_TOKEN: 'secret',
 }
@@ -20,6 +20,8 @@ test('loads and normalizes service configuration', () => {
   assert.equal(config.logtoJwksUri, 'https://auth.example.com/oidc/jwks')
   assert.equal(config.logtoClientPlatforms.get('client-1'), 'lingweave')
   assert.equal(config.corsAllowedOrigins.has('http://localhost:3000'), true)
+  assert.equal(config.logtoAdminScope, 'account:admin')
+  assert.equal(config.logtoRootScope, 'account:root')
 })
 
 test('allows minimal bootstrap without dynamic CORS or client mappings', () => {
@@ -45,17 +47,17 @@ test('rejects wildcard CORS configuration', () => {
   )
 })
 
-test('parses Logto role mapping and rejects unsafe values', () => {
+test('parses admin/root scopes and rejects unsafe values', () => {
   const config = loadConfig(validEnvironment)
-  assert.equal(config.logtoRoleClaim, 'roles')
-  assert.deepEqual([...config.logtoRoleMap], [['super_admin', 100], ['admin', 10]])
+  assert.equal(config.logtoAdminScope, 'account:admin')
+  assert.equal(config.logtoRootScope, 'account:root')
   assert.throws(
-    () => loadConfig({ ...validEnvironment, LOGTO_ROLE_MAP: '{"admin":999}' }),
-    /LOGTO_ROLE_MAP role values must be NewAPI roles/,
+    () => loadConfig({ ...validEnvironment, LOGTO_ADMIN_SCOPE: 'bad scope' }),
+    /LOGTO_ADMIN_SCOPE must be a syntactically valid OAuth scope/,
   )
   assert.throws(
-    () => loadConfig({ ...validEnvironment, LOGTO_ROLE_MAP: 'admin=10' }),
-    /LOGTO_ROLE_MAP must be a JSON object/,
+    () => loadConfig({ ...validEnvironment, LOGTO_ROOT_SCOPE: '' }),
+    /LOGTO_ROOT_SCOPE is required/,
   )
 })
 

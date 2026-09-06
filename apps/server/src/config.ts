@@ -8,10 +8,10 @@ export interface ServiceConfig {
   logtoJwksUri: string
   logtoRequiredScopes: readonly string[]
   logtoClientPlatforms: ReadonlyMap<string, string>
-  /** Logto claim that carries the authenticated user's roles (e.g. "roles"). */
-  logtoRoleClaim: string
-  /** Maps Logto role names to NewAPI numeric roles (admin/root only). */
-  logtoRoleMap: ReadonlyMap<string, number>
+  /** Scope that grants the NewAPI admin role (mapped to NewAPI role 10). */
+  logtoAdminScope: string
+  /** Scope that grants the NewAPI root role (mapped to NewAPI role 100). */
+  logtoRootScope: string
   newApiBaseUrl: string
   newApiInternalToken: string
   /** Optional Redis connection URL. Empty means in-memory caching only. */
@@ -30,8 +30,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServiceConfig 
     logtoJwksUri: requiredUrl(env.LOGTO_JWKS_URI ?? `${logtoIssuer}/jwks`, 'LOGTO_JWKS_URI'),
     logtoRequiredScopes: parseRequiredList(env.LOGTO_REQUIRED_SCOPES ?? 'ai:invoke', 'LOGTO_REQUIRED_SCOPES'),
     logtoClientPlatforms: parseClientPlatforms(env.LOGTO_CLIENT_PLATFORM_MAP ?? '{}'),
-    logtoRoleClaim: optionalString(env.LOGTO_ROLE_CLAIM) ?? 'roles',
-    logtoRoleMap: parseRoleMap(env.LOGTO_ROLE_MAP ?? '{}'),
+    logtoAdminScope: requireScope(env.LOGTO_ADMIN_SCOPE ?? 'account:admin', 'LOGTO_ADMIN_SCOPE'),
+    logtoRootScope: requireScope(env.LOGTO_ROOT_SCOPE ?? 'account:root', 'LOGTO_ROOT_SCOPE'),
     newApiBaseUrl: optionalUrl(env.NEW_API_BASE_URL, 'NEW_API_BASE_URL'),
     newApiInternalToken: optionalString(env.NEW_API_INTERNAL_TOKEN) ?? '',
     redisUrl: optionalRedisUrl(env.REDIS_URL),
@@ -43,6 +43,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServiceConfig 
 function optionalString(value: string | undefined): string | undefined {
   const normalized = value?.trim()
   return normalized || undefined
+}
+
+function requireScope(value: string | undefined, name: string): string {
+  const normalized = required(value, name)
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_\-:.]{0,127}$/.test(normalized)) {
+    throw new ServiceError(`${name} must be a syntactically valid OAuth scope`, 500, 'CONFIG_INVALID')
+  }
+  return normalized
 }
 
 function required(value: string | undefined, name: string): string {
@@ -151,32 +159,6 @@ function parseClientPlatforms(raw: string): ReadonlyMap<string, string> {
       throw new ServiceError('LOGTO_CLIENT_PLATFORM_MAP contains an invalid entry', 500, 'CONFIG_INVALID')
     }
     result.set(clientId.trim(), platform)
-  }
-  return result
-}
-
-
-function parseRoleMap(raw: string): ReadonlyMap<string, number> {
-  let value: unknown
-  try {
-    value = JSON.parse(raw)
-  } catch {
-    throw new ServiceError('LOGTO_ROLE_MAP must be a JSON object mapping Logto role names to NewAPI roles', 500, 'CONFIG_INVALID')
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ServiceError('LOGTO_ROLE_MAP must be a JSON object mapping Logto role names to NewAPI roles', 500, 'CONFIG_INVALID')
-  }
-  const result = new Map<string, number>()
-  for (const [roleName, roleValue] of Object.entries(value)) {
-    const name = roleName.trim()
-    if (!name) {
-      throw new ServiceError('LOGTO_ROLE_MAP contains an empty role name', 500, 'CONFIG_INVALID')
-    }
-    const parsed = Number(roleValue)
-    if (!Number.isSafeInteger(parsed) || ![1, 10, 100].includes(parsed)) {
-      throw new ServiceError('LOGTO_ROLE_MAP role values must be NewAPI roles (1, 10, or 100)', 500, 'CONFIG_INVALID')
-    }
-    result.set(name, parsed)
   }
   return result
 }

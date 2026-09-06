@@ -20,8 +20,8 @@ async function fixture() {
     logtoJwksUri: `${issuer}/jwks`,
     logtoRequiredScopes: ['ai:invoke'],
     logtoClientPlatforms: new Map([['client-1', 'lingweave']]),
-    logtoRoleClaim: 'roles',
-    logtoRoleMap: new Map([['super_admin', 100], ['admin', 10]]),
+    logtoAdminScope: 'account:admin',
+    logtoRootScope: 'account:root',
   }
   const verifier = new LogtoTokenVerifier(
     config,
@@ -61,17 +61,25 @@ test('accepts a valid Logto API access token and maps its client', async () => {
   })
 })
 
-test('maps Logto roles to NewAPI roles with highest privilege winning', async () => {
+test('maps Logto scopes to NewAPI roles with root winning', async () => {
   const { verifier, sign } = await fixture()
   const identity = await verifier.verify(
-    await sign({ roles: ['user', 'admin', 'super_admin'] })
+    await sign({ scope: 'openid ai:invoke account:admin account:root' })
   )
   assert.equal(identity.role, 100)
 })
 
-test('ignores unmapped role claims and never elevates the user', async () => {
+test('maps only the admin scope to the admin role', async () => {
   const { verifier, sign } = await fixture()
-  const identity = await verifier.verify(await sign({ roles: ['user', 'owner'] }))
+  const identity = await verifier.verify(
+    await sign({ scope: 'openid ai:invoke account:admin' })
+  )
+  assert.equal(identity.role, 10)
+})
+
+test('leaves a regular user without elevation when no admin/root scope is present', async () => {
+  const { verifier, sign } = await fixture()
+  const identity = await verifier.verify(await sign({ scope: 'openid ai:invoke' }))
   assert.equal(identity.role, undefined)
 })
 
