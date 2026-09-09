@@ -68,14 +68,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
 
     env:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_READ_TOKEN: ${{ github.token }}
       NEW_API_INTERNAL_TOKEN: ${{ secrets.NEW_API_INTERNAL_TOKEN }}
       LOGTO_ISSUER: ${{ vars.LOGTO_ISSUER }}
       LOGTO_AUDIENCE: ${{ vars.LOGTO_AUDIENCE }}
@@ -101,8 +104,6 @@ jobs:
           test -n "$DEPLOY_PORT"
           test -n "$DEPLOY_USER"
           test -n "$DEPLOY_PATH"
-          test -n "$GHCR_USERNAME"
-          test -n "$GHCR_READ_TOKEN"
           test -n "$LOGTO_ISSUER"
           test -n "$LOGTO_AUDIENCE"
           test -n "$CORS_ALLOWED_ORIGINS"
