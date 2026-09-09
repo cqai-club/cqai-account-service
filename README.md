@@ -6,7 +6,7 @@ CQAI Account Service 是 Logto 与 NewAPI 之间的账号桥接和 AI BFF。下�
 下游应用 ── Logto Access Token ──> Account Service ── NewAPI Key ──> NewAPI
 ```
 
-浏览器不会接触 NewAPI Service Token 或完整 API Key，也不依赖跨域 Cookie。
+浏览器业务流不会接触 NewAPI Service Token 或完整 API Key，也不依赖跨域 Cookie。受信任客户端如明确采用 CC Switch 直连模式，可通过 `/api/client-credential` 在一次受保护交换中取得用户平台 Key；取得后 Key 的生命周期由 Relay/NewAPI 控制。
 
 ## 项目结构
 
@@ -24,13 +24,16 @@ packages/client-sdk/  面向浏览器应用的轻量 SDK
 
 - Logto JWT 的 JWKS 签名、issuer、audience、有效期、scope 校验。
 - Logto Client ID 到内部 `platform` 的可信映射。
+- 从已验证 Access Token 读取 email、username/preferred_username 和 name，用于 Relay 首次 provisioning，不额外调用 UserInfo。
 - 精确来源 CORS 白名单，不使用跨域 Cookie。
 - `GET /api/account` 安全账号摘要，响应不包含 NewAPI Key。
+- `GET /api/client-credential` 面向受信任客户端的凭证交换接口，要求 Logto Access Token 且拒绝带 `Origin` 的浏览器请求；返回 Relay 地址和该用户的平台 API Key。
 - `/v1/*` 到 NewAPI 的请求代理和流式响应透传。
 - 请求体大小限制、敏感请求头替换和敏感响应头过滤。
 - 可选 Redis 缓存；未配置 `REDIS_URL` 时使用进程内存缓存，Key 以 AES-256-GCM 加密后写入 Redis。
 
 `cqai-relay` 已实现并注册 SDK 约定的 `POST /api/internal/provision`，由 `NEW_API_INTERNAL_TOKEN` 保护；接口合同见 [docs/new-api-provision-contract.md](docs/new-api-provision-contract.md)。
+在当前单一 Logto issuer 下，Relay 会通过 `users.oidc_id == subject` 让原生 OIDC 登录与 Account Service provisioning 复用同一本地用户；管理面 Session 与业务 Access Token 仍保持独立。
 
 ## 配置方式
 
@@ -75,6 +78,7 @@ Repository Variables 至少需要配置：
 - `ACCOUNT_CACHE_TTL_SECONDS`（默认 `300`）
 - `MAX_REQUEST_BODY_BYTES`（默认 `20971520`）
 - `NEW_API_BASE_URL`
+- `CLIENT_DEFAULT_MODEL`（可选，凭证交换响应中的默认模型名）
 
 示例：
 
@@ -89,7 +93,8 @@ LOGTO_CLIENT_PLATFORM_MAP={"l0odswrhnwfu31ikpa5bb":"lingweave"}
 2. 为该资源创建 `ai:invoke` 权限，并通过角色分配给允许使用 AI 的用户。
 3. 每个下游产品使用独立的 Logto SPA Application。
 4. 下游应用请求上述 API Resource 的 Access Token。
-5. 将 SPA 的 Client ID 通过 `LOGTO_CLIENT_PLATFORM_MAP` 映射为固定平台名。
+5. 下游如需将用户资料传入首次 provisioning，授权时同时请求 Logto `profile` 和 `email` 用户 scope。
+6. 将 SPA 的 Client ID 通过 `LOGTO_CLIENT_PLATFORM_MAP` 映射为固定平台名。
 
 ```env
 LOGTO_CLIENT_PLATFORM_MAP={"lingweave-logto-client-id":"lingweave","image-app-client-id":"image-app"}
@@ -112,6 +117,7 @@ LOGTO_CLIENT_PLATFORM_MAP={"lingweave-logto-client-id":"lingweave","image-app-cl
 | `CORS_ALLOWED_ORIGINS` | 允许跨域的浏览器来源 |
 | `NEW_API_BASE_URL` | NewAPI 服务端地址（业务接口未配置时返回 503） |
 | `NEW_API_INTERNAL_TOKEN` | NewAPI provisioning 内部令牌（不能为空、不能写入变量） |
+| `CLIENT_DEFAULT_MODEL` | 可选，受信任客户端凭证交换响应中的默认模型名 |
 | `REDIS_URL` | 可选 Redis 地址；未配置时使用进程内存缓存 |
 | `ACCOUNT_CACHE_TTL_SECONDS` | 账号与应用 Key 缓存秒数，默认 300 |
 | `MAX_REQUEST_BODY_BYTES` | 代理请求体上限，默认 20971520 |

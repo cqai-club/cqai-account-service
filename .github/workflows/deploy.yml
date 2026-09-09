@@ -30,6 +30,7 @@ jobs:
       LOGTO_AUDIENCE: ${{ vars.LOGTO_AUDIENCE }}
       NEW_API_BASE_URL: ${{ vars.NEW_API_BASE_URL }}
       CORS_ALLOWED_ORIGINS: ${{ vars.CORS_ALLOWED_ORIGINS }}
+      CLIENT_DEFAULT_MODEL: ${{ vars.CLIENT_DEFAULT_MODEL }}
       LOGTO_CLIENT_PLATFORM_MAP: ${{ vars.LOGTO_CLIENT_PLATFORM_MAP }}
       LOGTO_REQUIRED_SCOPES: ${{ vars.LOGTO_REQUIRED_SCOPES || 'ai:invoke' }}
       LOGTO_ADMIN_SCOPE: ${{ vars.LOGTO_ADMIN_SCOPE || 'account:admin' }}
@@ -92,7 +93,7 @@ jobs:
 
       - name: Sync runtime configuration
         run: |
-          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ADMIN_SCOPE LOGTO_ROOT_SCOPE ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN; do
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS CLIENT_DEFAULT_MODEL LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ADMIN_SCOPE LOGTO_ROOT_SCOPE ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN; do
             value="${!name}"
             if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
               echo "$name must be a single-line value" >&2
@@ -105,6 +106,9 @@ jobs:
             printf 'LOGTO_AUDIENCE=%s\n' "$LOGTO_AUDIENCE"
             printf 'NEW_API_BASE_URL=%s\n' "$NEW_API_BASE_URL"
             printf 'CORS_ALLOWED_ORIGINS=%s\n' "$CORS_ALLOWED_ORIGINS"
+            if [[ -n "$CLIENT_DEFAULT_MODEL" ]]; then
+              printf 'CLIENT_DEFAULT_MODEL=%s\n' "$CLIENT_DEFAULT_MODEL"
+            fi
             printf 'LOGTO_CLIENT_PLATFORM_MAP=%s\n' "$LOGTO_CLIENT_PLATFORM_MAP"
             printf 'LOGTO_REQUIRED_SCOPES=%s\n' "$LOGTO_REQUIRED_SCOPES"
             printf 'LOGTO_ADMIN_SCOPE=%s\n' "$LOGTO_ADMIN_SCOPE"

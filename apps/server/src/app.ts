@@ -88,6 +88,42 @@ export function createApp(config: ServiceConfig, dependencies: AppDependencies) 
     return c.json({ success: true, data })
   })
 
+  app.get('/api/client-credential', async (c) => {
+    // This endpoint deliberately returns a bearer credential. Keep it out of
+    // browser-readable flows even when the browser origin is otherwise
+    // allowed to call the Account Service. Trusted native clients and
+    // server-to-server callers do not send Origin.
+    if (c.req.header('origin')) {
+      return c.json(
+        {
+          success: false,
+          code: 'CLIENT_CREDENTIAL_ORIGIN_FORBIDDEN',
+          message: 'Client credential is not available to browsers',
+        },
+        403,
+      )
+    }
+
+    const account = await dependencies.accounts.resolve(c.get('identity'))
+    c.header('Cache-Control', 'no-store, no-cache, must-revalidate')
+    c.header('Pragma', 'no-cache')
+    c.header('Expires', '0')
+    c.header('X-Content-Type-Options', 'nosniff')
+    c.header('Content-Security-Policy', "default-src 'none'")
+    c.header('Referrer-Policy', 'no-referrer')
+    return c.json({
+      success: true,
+      data: {
+        baseUrl: config.newApiBaseUrl,
+        apiKey: account.apiKey,
+        // A fixed default the shell can use without asking the user; NewAPI may
+        // instead whitelist models per role. Empty when unset.
+        modelName: config.clientDefaultModel,
+        expiresAt: 0,
+      },
+    })
+  })
+
   app.all('/v1/*', async (c) => {
     const requestUrl = new URL(c.req.url)
     if (!config.newApiBaseUrl || !config.newApiInternalToken) {

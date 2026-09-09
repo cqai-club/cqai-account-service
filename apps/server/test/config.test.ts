@@ -12,6 +12,7 @@ const validEnvironment: NodeJS.ProcessEnv = {
   LOGTO_ROOT_SCOPE: 'account:root',
   NEW_API_BASE_URL: 'https://new-api.example.com',
   NEW_API_INTERNAL_TOKEN: 'secret',
+  CLIENT_DEFAULT_MODEL: 'gpt-4o-mini',
 }
 
 test('loads and normalizes service configuration', () => {
@@ -22,6 +23,7 @@ test('loads and normalizes service configuration', () => {
   assert.equal(config.corsAllowedOrigins.has('http://localhost:3000'), true)
   assert.equal(config.logtoAdminScope, 'account:admin')
   assert.equal(config.logtoRootScope, 'account:root')
+  assert.equal(config.clientDefaultModel, 'gpt-4o-mini')
 })
 
 test('allows minimal bootstrap without dynamic CORS or client mappings', () => {
@@ -30,6 +32,11 @@ test('allows minimal bootstrap without dynamic CORS or client mappings', () => {
   assert.deepEqual([...config.corsAllowedOrigins], [])
   assert.deepEqual([...config.logtoClientPlatforms], [])
   assert.deepEqual(config.logtoRequiredScopes, ['ai:invoke'])
+})
+
+test('allows the trusted-client default model to remain unset', () => {
+  const { CLIENT_DEFAULT_MODEL: _model, ...minimal } = validEnvironment
+  assert.equal(loadConfig(minimal).clientDefaultModel, '')
 })
 
 test('allows NewAPI settings to remain empty only when deployment can provision them', () => {

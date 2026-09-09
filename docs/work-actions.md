@@ -23,12 +23,9 @@
 - Redis 缓存实现（`apps/server/src/cache.ts`）：内存缓存兜底 + Redis 加密缓存。
 - GitHub Actions 部署流已把配置写入 `apps/server/.env.actions`（0600 权限），并校验单行值。
 - 生成额度提示：`/api/account` 返回 `quota`/`quotaUsed`，前端可提示"额度不足"（服务端无需改默认值）。
-
-### 未提交（工作区有改动，需审查后提交）
-- `apps/server/src/config.ts`：去掉 `LOGTO_ROLE_CLAIM` / `LOGTO_ROLE_MAP`，新增 `LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE`（默认 `account:admin` / `account:root`）。
-- `apps/server/src/logto.ts`：按 scope 解析角色——`root scope → 100`，`admin scope → 10`，无则普通用户；不再读 `roles` claim。
-- `.env.example`、`deploy.yml`、相关测试同步更新。
-- 注意：`LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE` 是新变量名，GitHub 仓库 Variable 里也需要对应新增/改名。
+- `LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE` 与按 scope 解析 role 已提交，不再依赖 `LOGTO_ROLE_CLAIM` / `LOGTO_ROLE_MAP`。
+- Account Service 已从已验证 Access Token 中读取 email、username/preferred_username 和 name，并通过 Account SDK 透传给 Relay 首次 provisioning。
+- Relay 已支持 OIDC 用户与 `ExternalAccountIdentity` 双向复用同一本地用户，并覆盖并发首次请求。
 
 ---
 
@@ -38,7 +35,7 @@
 - [ ] 确认每个业务应用都使用 Logto API Resource Access Token，并请求 `ai:invoke`。
 - [ ] 确认业务应用只调用 Account Service 的 `/api/account`、`/v1/*`，不直接持有 Relay Service Token 或完整 API Key。
 - [ ] 验证首次访问 `/api/account` 或 `/v1/*` 时自动完成 Relay provisioning。
-- [ ] Relay 原生 OIDC 仅作为管理后台/兼容入口保留，不要求在本次改造中删除或下线。
+- [x] Relay 原生 OIDC 仅作为管理后台/兼容入口保留，不在本次改造中删除或下线。
 
 ### P1 配置持久化（GitHub Actions）
 - [ ] 确认仓库变量里已存在（用户在截图中已确认部分已有）：
@@ -60,15 +57,15 @@
 - [ ] 验证：带 root scope 的 token 建号后是超级管理员；带 admin scope 是管理员；没有 scope 是普通用户。
 
 ### P4 多账号/多应用映射
-- [ ] 核对下列映射行为（需求已写明，代码层大多已实现，需测试覆盖）：
+- [ ] 核对下列映射行为（核心幂等、跨 platform、OIDC 用户复用和并发首次请求已有 Relay 测试，其余需继续补齐）：
   - `issuer + sub` 相同 → 复用用户；platform 不同 → 复用用户 + 新建应用 Key。
   - 两个 Client ID 映射同一 platform → 复用同一把 Key。
   - 同人两个 Logto 账号（sub 不同）→ 两个 NewAPI 用户。
   - 邮箱相同不合并。
   - 并发首次访问 → 唯一约束保证复用同一用户和 Key。
-  - 无邮箱时 bridge 允许、不影响建号（原生 OIDC 强制邮箱的差异已随 OIDC 关闭消除）。
+  - 无邮箱时 bridge 和 Relay 原生 OIDC 都允许建号；OIDC 优先使用已验证 ID Token 资料。
   - 应用 Key 被删：当前不自动重建，直接报错（需求接受，仅需归档说明）。
-- [ ] 缺：并发首次访问的数据库唯一约束测试（若 relay 侧没有，补一条）。
+- [x] Relay 已有并发首次访问的数据库唯一约束/回读测试，会校验只生成一个用户、Token、Identity 和 AppCredential。
 
 ### P5 用户体验 / 提示
 - [ ] 新用户默认额度 0 时，前端给出明确提示（额度不足/联系管理员），不另设服务端默认值。
@@ -83,19 +80,19 @@
 |---|---|
 | `apps/server/src/config.ts` | scope 解析，删 role map，新增 admin/root scope |
 | `apps/server/src/logto.ts` | 按 scope 映射角色 |
-| `apps/server/src/accounts.ts` | 透传 `role` 到 provision（已存在，确认） |
+| `apps/server/src/accounts.ts` | 透传已验证的 email、username、name 和 `role` 到 provision |
 | `apps/server/test/*` | 同步测试并全绿 |
 | `.github/workflows/deploy.yml` | 变量名同步 |
 | `apps/server/.env.example` | 文档同步 |
 | `README.md` | 更新配置说明（已完成） |
 
-> 当前工作区已有上述改动，执行前先 `git diff` 审查 → `npm run typecheck` → `npm test` → `npm run build`。
+> 上述 Account Service 改动已提交。继续改造时仍需先 `git diff` 审查 → `npm run typecheck` → `npm test` → `npm run build`。
 
 ### `cqai-relay`（NewAPI）
 | 文件 | 改动 |
 |---|---|
 | `controller/account_provision.go` / `service/account_provision.go` | 提供受内部 Token 保护的幂等 provisioning |
-| `model/account_provision.go` | 维护 `(issuer, subject)` 身份和 `(user, platform)` 应用凭证 |
+| `model/account_provision.go` | 维护 `(issuer, subject)` 身份和 `(user, platform)` 应用凭证，并与 `users.oidc_id` 复用同一用户 |
 | Relay 原生 OIDC | 保留为管理后台/兼容入口，不承担业务应用的统一桥接职责 |
 
 ---
@@ -106,8 +103,9 @@ cd cqai-account-service && npm run typecheck && npm test && npm run build && git
 cd ../cqai-relay && go test ./... # 或 make test
 ```
 
-## 六、需要用户确认的决策
-1. 业务应用是否都通过 Account Service 调用 AI；Relay 管理后台是否继续保留原生 OIDC 入口？
-2. `LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE` 的确切 scope 字符串是否就是 `account:admin` / `account:root`？
-3. Relay 原生 OIDC 是否仅作为管理后台入口保留（本次不删除、不下线）？
-4. 是不是所有 n8n/其他 AI 应用都只对接 Account Service 的 `/api/account` 和 `/v1/*`（不碰 relay）？
+## 六、已确定与待确认的决策
+
+- 已确定：业务 AI 统一通过 Account Service；Relay 原生 OIDC 保留为管理后台/兼容入口，本次不删除、不下线。
+- 待部署核对：`LOGTO_ADMIN_SCOPE` / `LOGTO_ROOT_SCOPE` 是否在 Logto 和生产环境中均已配置为 `account:admin` / `account:root`。
+- 待产品确认：n8n 和后续其他 AI 应用是否全部只对接 Account Service 的 `/api/account` 和 `/v1/*`。
+- 待安全决策：Account Service provisioning 是否要对已有用户同步角色；当前仅首次建号使用 role。
