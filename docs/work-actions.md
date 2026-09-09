@@ -43,8 +43,9 @@
 - [ ] 新增/改名变量：
   - `LOGTO_ADMIN_SCOPE`（默认 `account:admin`）
   - `LOGTO_ROOT_SCOPE`（默认 `account:root`）
-- [ ] 确认 Secrets 已有：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`、`NEW_API_INTERNAL_TOKEN`、`REDIS_URL`（可选）。
-- [ ] 重新部署后检查：启动日志无 `CONFIG_INVALID`，`/status` 或环境变量生效。
+- [ ] 确认 Secrets 已有：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`、`GHCR_USERNAME`、`GHCR_READ_TOKEN`、`NEW_API_INTERNAL_TOKEN`、`REDIS_URL`（可选）。
+- [ ] 确认服务器已安装 Docker，部署用户可以运行 Docker，且 GHCR Token 至少有 `read:packages`。
+- [ ] 重新部署后检查：`current` 镜像健康、`rollback` 镜像仍保留、host network 下 `/healthz` 返回 200，配置环境变量生效。
 
 ### P2 Redis 确认
 - [ ] 若业务高频调用，建议启用独立 Redis（回环地址 `127.0.0.1:6380`，带密码），`REDIS_URL` 放 Secret。
@@ -82,7 +83,8 @@
 | `apps/server/src/logto.ts` | 按 scope 映射角色 |
 | `apps/server/src/accounts.ts` | 透传已验证的 email、username、name 和 `role` 到 provision |
 | `apps/server/test/*` | 同步测试并全绿 |
-| `.github/workflows/deploy.yml` | 变量名同步 |
+| `.github/workflows/deploy.yml` | Actions 测试、构建并推送 GHCR；服务器拉取 SHA 镜像并保留 current/rollback |
+| `Dockerfile` / `.dockerignore` | 构建生产运行镜像 |
 | `apps/server/.env.example` | 文档同步 |
 | `README.md` | 更新配置说明（已完成） |
 
@@ -102,6 +104,9 @@
 cd cqai-account-service && npm run typecheck && npm test && npm run build && git diff --check
 cd ../cqai-relay && go test ./... # 或 make test
 ```
+
+部署工作流会将镜像推送到 `ghcr.io/cqai-club/cqai-account-service:<commit-sha>`，服务器只拉取
+该不可变标签。服务器 Docker 标签 `current` 与 `rollback` 分别保留当前版本和上一个成功版本。
 
 ## 六、已确定与待确认的决策
 

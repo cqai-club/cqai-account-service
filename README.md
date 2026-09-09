@@ -54,13 +54,14 @@ apps/server/.env.actions
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PATH`
-- `DEPLOY_COMMAND`（可选，默认 `systemctl restart cqai-account-service`）
+- `GHCR_USERNAME`（服务器拉取私有 GHCR 镜像的账号）
+- `GHCR_READ_TOKEN`（服务器拉取 GHCR 镜像的 Token，至少需要 `read:packages`）
 - `NEW_API_INTERNAL_TOKEN`（必填，使用 Relay 生成的内部 Token）
 - `REDIS_URL`（可选，例如 `redis://:<password>@127.0.0.1:6380/0`）
 
 其中 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`
-放在 `production` 环境的 Secrets 中；`DEPLOY_COMMAND` 和 `NEW_API_INTERNAL_TOKEN`
-可放在仓库级 Secrets。
+放在 `production` 环境的 Secrets 中；`GHCR_USERNAME`、`GHCR_READ_TOKEN` 和
+`NEW_API_INTERNAL_TOKEN` 可放在仓库级 Secrets。
 
 ### GitHub Actions Variables
 
@@ -79,6 +80,7 @@ Repository Variables 至少需要配置：
 - `MAX_REQUEST_BODY_BYTES`（默认 `20971520`）
 - `NEW_API_BASE_URL`
 - `CLIENT_DEFAULT_MODEL`（可选，凭证交换响应中的默认模型名）
+- `ACCOUNT_SERVICE_PORT`（可选，Docker host network 使用的服务端口，默认 `8787`）
 
 示例：
 
@@ -137,6 +139,24 @@ npm run dev
 ```
 
 默认监听 `http://localhost:8787`。
+
+## 容器发布与回滚
+
+推送到 `main` 或手动触发 Actions 时，工作流会先执行 typecheck、测试和构建，再构建
+`ghcr.io/cqai-club/cqai-account-service:<commit-sha>` 镜像并推送到 GHCR。服务器不再同步源码或
+在服务器编译，而是拉取这个不可变 SHA 镜像，用 Docker 运行并通过 `/healthz` 健康检查。
+
+服务器上的镜像标签约定为：
+
+- `ghcr.io/cqai-club/cqai-account-service:current`：当前运行版本。
+- `ghcr.io/cqai-club/cqai-account-service:rollback`：上一个成功版本。
+
+部署成功后只清理其他 Account Service 镜像标签；健康检查失败时自动恢复 `rollback` 标签。
+首次部署还没有回滚镜像时，会尝试恢复原有 `cqai-account-service` systemd 服务。
+
+服务器需要预先安装 Docker，并允许部署用户运行 Docker；容器使用 host network，以兼容服务器上
+绑定 `127.0.0.1` 的 Redis 和反向代理。若 GHCR 包是私有的，需要配置 `GHCR_USERNAME` 和具有
+`read:packages` 权限的 `GHCR_READ_TOKEN`；如反向代理不是默认 `8787`，同步设置 `ACCOUNT_SERVICE_PORT`。
 
 ## 发布前检查
 

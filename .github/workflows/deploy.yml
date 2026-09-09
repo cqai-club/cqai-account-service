@@ -13,8 +13,58 @@ concurrency:
   group: deploy-main
   cancel-in-progress: true
 
+env:
+  IMAGE_REPOSITORY: ghcr.io/cqai-club/cqai-account-service
+
 jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout account service
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build packages
+        run: npm run build
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+            ${{ env.IMAGE_REPOSITORY }}:latest
+
   deploy:
+    needs: build-and-push
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
@@ -24,7 +74,8 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-      DEPLOY_COMMAND: ${{ secrets.DEPLOY_COMMAND || 'systemctl restart cqai-account-service' }}
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
       NEW_API_INTERNAL_TOKEN: ${{ secrets.NEW_API_INTERNAL_TOKEN }}
       LOGTO_ISSUER: ${{ vars.LOGTO_ISSUER }}
       LOGTO_AUDIENCE: ${{ vars.LOGTO_AUDIENCE }}
@@ -38,6 +89,10 @@ jobs:
       ACCOUNT_CACHE_TTL_SECONDS: ${{ vars.ACCOUNT_CACHE_TTL_SECONDS || '300' }}
       MAX_REQUEST_BODY_BYTES: ${{ vars.MAX_REQUEST_BODY_BYTES || '20971520' }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
+      IMAGE_TAG: ${{ github.sha }}
+      CONTAINER_NAME: cqai-account-service
+      LEGACY_SERVICE_NAME: ${{ vars.LEGACY_SERVICE_NAME || 'cqai-account-service' }}
+      ACCOUNT_SERVICE_PORT: ${{ vars.ACCOUNT_SERVICE_PORT || '8787' }}
 
     steps:
       - name: Validate deployment settings
@@ -46,6 +101,8 @@ jobs:
           test -n "$DEPLOY_PORT"
           test -n "$DEPLOY_USER"
           test -n "$DEPLOY_PATH"
+          test -n "$GHCR_USERNAME"
+          test -n "$GHCR_READ_TOKEN"
           test -n "$LOGTO_ISSUER"
           test -n "$LOGTO_AUDIENCE"
           test -n "$CORS_ALLOWED_ORIGINS"
@@ -56,11 +113,7 @@ jobs:
           test -n "$ACCOUNT_CACHE_TTL_SECONDS"
           test -n "$MAX_REQUEST_BODY_BYTES"
           test -n "$NEW_API_INTERNAL_TOKEN"
-
-      - name: Checkout account service
-        uses: actions/checkout@v4
-        with:
-          path: cqai-account-service
+          [[ "$ACCOUNT_SERVICE_PORT" =~ ^[0-9]+$ ]]
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -75,21 +128,7 @@ jobs:
       - name: Prepare remote directories
         run: |
           ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "mkdir -p '$DEPLOY_PATH/cqai-account-service'"
-
-      - name: Sync source
-        run: |
-          rsync -az --delete \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude 'node_modules' \
-            --exclude '.env' \
-            --exclude '.env.actions' \
-            --exclude 'dist/' \
-            --exclude '*/dist/' \
-            --exclude '.tsbuildinfo' \
-            ./cqai-account-service/ \
-            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/cqai-account-service/"
+            "mkdir -p '$DEPLOY_PATH/cqai-account-service/apps/server'"
 
       - name: Sync runtime configuration
         run: |
@@ -122,7 +161,100 @@ jobs:
           } | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "install -m 600 /dev/stdin '$DEPLOY_PATH/cqai-account-service/apps/server/.env.actions'"
 
-      - name: Install, build, and restart
+      - name: Log in to GHCR on deploy server
         run: |
-          remote_command="cd '${DEPLOY_PATH}/cqai-account-service' && npm ci && npm run build && ${DEPLOY_COMMAND}"
-          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -lc "$(printf '%q' "$remote_command")"
+          remote_ghcr_username="$(printf '%q' "$GHCR_USERNAME")"
+          printf '%s' "$GHCR_READ_TOKEN" | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io --username ${remote_ghcr_username} --password-stdin"
+
+      - name: Pull and activate image
+        run: |
+          remote_deploy_path="$(printf '%q' "$DEPLOY_PATH")"
+          remote_image_repository="$(printf '%q' "$IMAGE_REPOSITORY")"
+          remote_image_tag="$(printf '%q' "$IMAGE_TAG")"
+          remote_container_name="$(printf '%q' "$CONTAINER_NAME")"
+          remote_legacy_service="$(printf '%q' "$LEGACY_SERVICE_NAME")"
+          remote_service_port="$(printf '%q' "$ACCOUNT_SERVICE_PORT")"
+          remote_command="DEPLOY_PATH=${remote_deploy_path} IMAGE_REPOSITORY=${remote_image_repository} IMAGE_TAG=${remote_image_tag} CONTAINER_NAME=${remote_container_name} LEGACY_SERVICE_NAME=${remote_legacy_service} ACCOUNT_SERVICE_PORT=${remote_service_port} bash -s"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" <<'REMOTE_SCRIPT'
+          set -Eeuo pipefail
+
+          state_dir="${DEPLOY_PATH}/cqai-account-service"
+          env_file="${state_dir}/apps/server/.env.actions"
+          image_ref="${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+          current_ref="${IMAGE_REPOSITORY}:current"
+          rollback_ref="${IMAGE_REPOSITORY}:rollback"
+
+          test -f "$env_file"
+          docker pull "$image_ref"
+
+          wait_for_healthy() {
+            for _ in $(seq 1 30); do
+              status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+              case "$status" in
+                healthy)
+                  return 0
+                  ;;
+                unhealthy)
+                  return 1
+                  ;;
+              esac
+              sleep 2
+            done
+            return 1
+          }
+
+          run_current() {
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            docker run --detach \
+              --name "$CONTAINER_NAME" \
+              --restart unless-stopped \
+              --network host \
+              --env-file "$env_file" \
+              --env "PORT=${ACCOUNT_SERVICE_PORT}" \
+              "$current_ref" >/dev/null
+          }
+
+          restore_legacy_service() {
+            systemctl enable --now "$LEGACY_SERVICE_NAME" >/dev/null 2>&1 || true
+          }
+
+          rollback() {
+            if docker image inspect "$rollback_ref" >/dev/null 2>&1; then
+              docker tag "$rollback_ref" "$current_ref"
+              if run_current && wait_for_healthy; then
+                echo "Rolled back to the previous Account Service image"
+                return 0
+              fi
+            fi
+            restore_legacy_service
+            echo "No healthy rollback image is available" >&2
+            return 1
+          }
+
+          if docker image inspect "$current_ref" >/dev/null 2>&1; then
+            docker tag "$current_ref" "$rollback_ref"
+          fi
+
+          systemctl disable --now "$LEGACY_SERVICE_NAME" >/dev/null 2>&1 || true
+          if ! docker tag "$image_ref" "$current_ref" || ! run_current || ! wait_for_healthy; then
+            echo "New Account Service image failed its health check" >&2
+            rollback
+            exit 1
+          fi
+
+          while IFS= read -r tag; do
+            case "$tag" in
+              "$current_ref"|"$rollback_ref") ;;
+              *) docker image rm "$tag" >/dev/null 2>&1 || true ;;
+            esac
+          done < <(docker image ls "$IMAGE_REPOSITORY" --format '{{.Repository}}:{{.Tag}}')
+
+          echo "Account Service image is active; current and rollback tags are retained"
+          REMOTE_SCRIPT
+
+      - name: Log out of GHCR on deploy server
+        if: always()
+        run: |
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker logout ghcr.io >/dev/null 2>&1 || true"
