@@ -43,8 +43,8 @@
 - [ ] 新增/改名变量：
   - `LOGTO_ADMIN_SCOPE`（默认 `account:admin`）
   - `LOGTO_ROOT_SCOPE`（默认 `account:root`）
-- [ ] 确认 Secrets 已有：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`、`GHCR_USERNAME`、`GHCR_READ_TOKEN`、`NEW_API_INTERNAL_TOKEN`、`REDIS_URL`（可选）。
-- [ ] 确认服务器已安装 Docker，部署用户可以运行 Docker，且 GHCR Token 至少有 `read:packages`。
+- [ ] 确认 Secrets 已有：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`、`NEW_API_INTERNAL_TOKEN`、`REDIS_URL`（可选）。
+- [ ] 确认服务器已安装 Docker，部署用户可以运行 Docker；Actions deploy job 使用工作流自带的 `GITHUB_TOKEN` 读取 GHCR。
 - [ ] 重新部署后检查：`current` 镜像健康、`rollback` 镜像仍保留、host network 下 `/healthz` 返回 200，配置环境变量生效。
 
 ### P2 Redis 确认

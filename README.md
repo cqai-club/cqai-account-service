@@ -54,14 +54,11 @@ apps/server/.env.actions
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PATH`
-- `GHCR_USERNAME`（服务器拉取私有 GHCR 镜像的账号）
-- `GHCR_READ_TOKEN`（服务器拉取 GHCR 镜像的 Token，至少需要 `read:packages`）
 - `NEW_API_INTERNAL_TOKEN`（必填，使用 Relay 生成的内部 Token）
 - `REDIS_URL`（可选，例如 `redis://:<password>@127.0.0.1:6380/0`）
 
 其中 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`
-放在 `production` 环境的 Secrets 中；`GHCR_USERNAME`、`GHCR_READ_TOKEN` 和
-`NEW_API_INTERNAL_TOKEN` 可放在仓库级 Secrets。
+放在 `production` 环境的 Secrets 中；`NEW_API_INTERNAL_TOKEN` 可放在仓库级 Secrets。
 
 ### GitHub Actions Variables
 
@@ -155,8 +152,8 @@ npm run dev
 首次部署还没有回滚镜像时，会尝试恢复原有 `cqai-account-service` systemd 服务。
 
 服务器需要预先安装 Docker，并允许部署用户运行 Docker；容器使用 host network，以兼容服务器上
-绑定 `127.0.0.1` 的 Redis 和反向代理。若 GHCR 包是私有的，需要配置 `GHCR_USERNAME` 和具有
-`read:packages` 权限的 `GHCR_READ_TOKEN`；如反向代理不是默认 `8787`，同步设置 `ACCOUNT_SERVICE_PORT`。
+绑定 `127.0.0.1` 的 Redis 和反向代理。部署 job 使用工作流自带的 `GITHUB_TOKEN` 登录 GHCR，
+并通过 `packages: read` 拉取镜像；如反向代理不是默认 `8787`，同步设置 `ACCOUNT_SERVICE_PORT`。
 
 ## 发布前检查
 
