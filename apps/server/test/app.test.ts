@@ -28,6 +28,7 @@ const config: ServiceConfig = {
   redisUrl: '',
   accountCacheTtlMs: 0,
   maxRequestBodyBytes: 1024,
+  clientDefaultModel: 'gpt-4o-mini',
 }
 
 const verifier: TokenVerifier = {
@@ -59,6 +60,47 @@ test('rejects protected requests without a bearer token', async () => {
     success: false,
     code: 'AUTH_TOKEN_REQUIRED',
     message: 'Bearer access token is required',
+  })
+})
+
+test('client-credential serves the relay key to a server-side no-Origin caller', async () => {
+  const app = createApp(config, { verifier, accounts })
+  // No Origin header simulates a server-to-server trusted client (python
+  // requests), which the CORS middleware must not reject. The response is
+  // deliberately not CORS-exposed to browsers.
+  const response = await app.request('http://account.example.com/api/client-credential', {
+    headers: { Authorization: 'Bearer logto-token' },
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('cache-control'), 'no-store, no-cache, must-revalidate')
+  assert.equal(response.headers.get('pragma'), 'no-cache')
+  assert.equal(response.headers.get('expires'), '0')
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(response.headers.get('content-security-policy'), "default-src 'none'")
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+  const body = (await response.json()) as {
+    success: boolean
+    data: { baseUrl: string; apiKey: string; modelName: string; expiresAt: number }
+  }
+  assert.equal(body.success, true)
+  assert.deepEqual(body.data, {
+    baseUrl: 'https://new-api.example.com',
+    apiKey: 'new-api-secret-key',
+    modelName: 'gpt-4o-mini',
+    expiresAt: 0,
+  })
+})
+
+test('client-credential rejects every browser Origin, including allowlisted origins', async () => {
+  const app = createApp(config, { verifier, accounts })
+  const response = await app.request('http://account.example.com/api/client-credential', {
+    headers: { Authorization: 'Bearer logto-token', Origin: 'https://app.example.com' },
+  })
+  assert.equal(response.status, 403)
+  assert.deepEqual(await response.json(), {
+    success: false,
+    code: 'CLIENT_CREDENTIAL_ORIGIN_FORBIDDEN',
+    message: 'Client credential is not available to browsers',
   })
 })
 

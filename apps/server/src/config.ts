@@ -14,6 +14,8 @@ export interface ServiceConfig {
   logtoRootScope: string
   newApiBaseUrl: string
   newApiInternalToken: string
+  /** Default model name returned to trusted clients; empty means none. */
+  clientDefaultModel: string
   /** Optional Redis connection URL. Empty means in-memory caching only. */
   redisUrl: string
   accountCacheTtlMs: number
@@ -34,6 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServiceConfig 
     logtoRootScope: requireScope(env.LOGTO_ROOT_SCOPE ?? 'account:root', 'LOGTO_ROOT_SCOPE'),
     newApiBaseUrl: optionalUrl(env.NEW_API_BASE_URL, 'NEW_API_BASE_URL'),
     newApiInternalToken: optionalString(env.NEW_API_INTERNAL_TOKEN) ?? '',
+    clientDefaultModel: optionalString(env.CLIENT_DEFAULT_MODEL) ?? '',
     redisUrl: optionalRedisUrl(env.REDIS_URL),
     accountCacheTtlMs: nonNegativeInteger(env.ACCOUNT_CACHE_TTL_SECONDS ?? '300', 'ACCOUNT_CACHE_TTL_SECONDS') * 1000,
     maxRequestBodyBytes: positiveInteger(env.MAX_REQUEST_BODY_BYTES ?? '20971520', 'MAX_REQUEST_BODY_BYTES'),
