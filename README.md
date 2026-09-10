@@ -155,6 +155,16 @@ npm run dev
 绑定 `127.0.0.1` 的 Redis 和反向代理。部署 job 使用工作流自带的 `GITHUB_TOKEN` 登录 GHCR，
 并通过 `packages: read` 拉取镜像；如反向代理不是默认 `8787`，同步设置 `ACCOUNT_SERVICE_PORT`。
 
+部署用户还必须能够非交互地切换旧的 systemd 服务，否则旧进程会继续占用 host network 的服务端口，
+新容器会因 `EADDRINUSE` 健康检查失败。以默认用户和服务名为例，服务器可配置最小 sudo 权限：
+
+```sudoers
+cqai-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now cqai-account-service, /usr/bin/systemctl enable --now cqai-account-service
+```
+
+如果修改了 `LEGACY_SERVICE_NAME`，sudoers 中的服务名也必须同步修改。workflow 使用 `sudo -n`，
+权限缺失时会在启动新容器前直接失败；健康检查失败时会输出容器诊断并清理失败容器，避免留下重启循环。
+
 ## 发布前检查
 
 ```bash

@@ -189,6 +189,19 @@ jobs:
           test -f "$env_file"
           docker pull "$image_ref"
 
+          print_container_diagnostics() {
+            echo "Container state:" >&2
+            docker inspect --format 'status={{.State.Status}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}}' "$CONTAINER_NAME" >&2 || true
+            echo "Health check history:" >&2
+            docker inspect --format '{{range .State.Health.Log}}{{.Start}} exit={{.ExitCode}} output={{printf "%q" .Output}}{{"\n"}}{{end}}' "$CONTAINER_NAME" >&2 || true
+            echo "Container logs:" >&2
+            docker logs --tail 80 "$CONTAINER_NAME" 2>&1 || true
+          }
+
+          cleanup_container() {
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+          }
+
           wait_for_healthy() {
             for _ in $(seq 1 30); do
               status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
@@ -197,6 +210,12 @@ jobs:
                   return 0
                   ;;
                 unhealthy)
+                  return 1
+                  ;;
+              esac
+              container_state="$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+              case "$container_state" in
+                exited|dead|restarting)
                   return 1
                   ;;
               esac
@@ -217,18 +236,22 @@ jobs:
           }
 
           restore_legacy_service() {
-            systemctl enable --now "$LEGACY_SERVICE_NAME" >/dev/null 2>&1 || true
+            sudo -n /usr/bin/systemctl enable --now "$LEGACY_SERVICE_NAME"
           }
 
           rollback() {
             if docker image inspect "$rollback_ref" >/dev/null 2>&1; then
-              docker tag "$rollback_ref" "$current_ref"
-              if run_current && wait_for_healthy; then
+              if docker tag "$rollback_ref" "$current_ref" && run_current && wait_for_healthy; then
                 echo "Rolled back to the previous Account Service image"
                 return 0
               fi
+              echo "Rollback image failed its health check" >&2
+              print_container_diagnostics
+              cleanup_container
             fi
-            restore_legacy_service
+            if ! restore_legacy_service; then
+              echo "Unable to restore legacy systemd service; check deploy-user sudoers permissions" >&2
+            fi
             echo "No healthy rollback image is available" >&2
             return 1
           }
@@ -237,9 +260,15 @@ jobs:
             docker tag "$current_ref" "$rollback_ref"
           fi
 
-          systemctl disable --now "$LEGACY_SERVICE_NAME" >/dev/null 2>&1 || true
+          if ! sudo -n /usr/bin/systemctl disable --now "$LEGACY_SERVICE_NAME"; then
+            echo "Cannot stop legacy systemd service '$LEGACY_SERVICE_NAME'. Grant the deploy user passwordless sudo for the exact disable/enable commands before deploying." >&2
+            exit 1
+          fi
+
           if ! docker tag "$image_ref" "$current_ref" || ! run_current || ! wait_for_healthy; then
             echo "New Account Service image failed its health check" >&2
+            print_container_diagnostics
+            cleanup_container
             rollback
             exit 1
           fi
