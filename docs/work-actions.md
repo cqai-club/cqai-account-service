@@ -39,7 +39,7 @@
 
 ### P1 配置持久化（GitHub Actions）
 - [ ] 确认仓库变量里已存在（用户在截图中已确认部分已有）：
-  - `LOGTO_ISSUER`、`LOGTO_AUDIENCE`、`CORS_ALLOWED_ORIGINS`、`LOGTO_CLIENT_PLATFORM_MAP`
+  - `LOGTO_ISSUER`、`LOGTO_AUDIENCE`、`CORS_ALLOWED_ORIGINS`、`LOGTO_CLIENT_PLATFORM_MAP`（包含 `platform`、`client_type` 和服务端支付 `redirects`）
 - [ ] 新增/改名变量：
   - `LOGTO_ADMIN_SCOPE`（默认 `account:admin`）
   - `LOGTO_ROOT_SCOPE`（默认 `account:root`）

@@ -23,7 +23,7 @@
 
 - 用 JWKS 校验 Logto JWT 签名、issuer、audience 和过期时间。
 - 校验必要 scope，默认是 `ai:invoke`。
-- 用 `client_id -> platform` 白名单确定应用平台，不信任前端传入的 platform。
+- 用 `client_id -> platform/client_type/payment redirects` 白名单确定应用平台和支付回跳策略，不信任前端传入的 platform 或回跳地址。
 - 从已验证 Access Token 中读取 email、username/preferred_username 和 name，用于首次 Relay 建号，不额外调用 UserInfo。
 - 使用 `(issuer, subject, platform)` 解析/缓存账号。
 - 通过幂等的 `POST /api/internal/provision` 获取 Relay 应用凭证。
@@ -48,13 +48,15 @@ Relay 当前的 `/oauth/oidc` 是另一条传统 Web 登录链路：它自己换
 | `LOGTO_ISSUER` | 与 Logto issuer 完全一致 |
 | `LOGTO_AUDIENCE` | 与授权请求中的 `resource` 完全一致 |
 | `LOGTO_REQUIRED_SCOPES` | 至少包含 `ai:invoke` |
-| `LOGTO_CLIENT_PLATFORM_MAP` | 包含实际下游 Client ID，并固定 platform |
+| `LOGTO_CLIENT_PLATFORM_MAP` | 包含实际下游 Client ID，并固定 platform、`client_type` 和支付回跳 |
 | `LOGTO_ADMIN_SCOPE` | 默认 `account:admin` |
 | `LOGTO_ROOT_SCOPE` | 默认 `account:root` |
 | `NEW_API_BASE_URL` | 指向 Relay 服务 |
 | `CLIENT_DEFAULT_MODEL` | 可选，`/api/client-credential` 返回的默认模型名 |
 | `NEW_API_INTERNAL_TOKEN` | 与 Relay provisioning token 一致，仅存服务端 Secret |
 | `CORS_ALLOWED_ORIGINS` | 只允许明确的前端来源 |
+
+其中每个 Client 的配置还包含 `client_type` 和 `redirects`。Web Client 的 `redirects` 以精确 Origin 为键，且每个 Origin 必须同时列在 `CORS_ALLOWED_ORIGINS`；Desktop Client 的 `redirects` 直接配置固定的 `cqai://` 等自定义协议。`POST /api/billing/topups` 不接受调用方提交的 `success_url`、`cancel_url` 或 `return_url`。
 
 ## 当前未闭环事项
 

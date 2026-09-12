@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose'
 
 import type { ServiceConfig } from './config.js'
+import { debugLog, fingerprintForLog, safeErrorMetadata } from './diagnostics.js'
 import { ServiceError } from './errors.js'
 import type { TokenVerificationOptions, TokenVerifier, VerifiedIdentity } from './types.js'
 
@@ -25,6 +26,7 @@ type LogtoVerifierConfig = Pick<
   | 'logtoClientPlatforms'
   | 'logtoAdminScope'
   | 'logtoRootScope'
+  | 'debugAuthLogs'
 >
 
 export class LogtoTokenVerifier implements TokenVerifier {
@@ -39,6 +41,7 @@ export class LogtoTokenVerifier implements TokenVerifier {
 
   async verify(token: string, options: TokenVerificationOptions = {}): Promise<VerifiedIdentity> {
     if (!isJwt(token)) {
+      debugLog(this.config.debugAuthLogs, 'auth.token_rejected', { reason: 'not_jwt' })
       throw new ServiceError('Access token is invalid or expired', 401, 'AUTH_TOKEN_INVALID')
     }
 
@@ -50,7 +53,8 @@ export class LogtoTokenVerifier implements TokenVerifier {
         clockTolerance: 5,
       })
       payload = result.payload
-    } catch {
+    } catch (error) {
+      debugLog(this.config.debugAuthLogs, 'auth.jwt_verification_failed', safeErrorMetadata(error))
       throw new ServiceError('Access token is invalid or expired', 401, 'AUTH_TOKEN_INVALID')
     }
 
@@ -68,9 +72,11 @@ function verifiedIdentity(
   // must always carry a finite NumericDate expiry so a token without an
   // expiration can never become an effectively perpetual bearer credential.
   if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+    debugLog(config.debugAuthLogs, 'auth.claims_rejected', { reason: 'missing_exp' })
     throw new ServiceError('Access token is missing a valid expiration', 401, 'AUTH_CLAIMS_INVALID')
   }
   if (payload.exp <= Math.floor(Date.now() / 1000) - 5) {
+    debugLog(config.debugAuthLogs, 'auth.claims_rejected', { reason: 'expired', expiration: payload.exp })
     throw new ServiceError('Access token is invalid or expired', 401, 'AUTH_TOKEN_INVALID')
   }
 
@@ -79,30 +85,72 @@ function verifiedIdentity(
   const clientIdClaim = stringClaim(payload.client_id)
   const authorizedPartyClaim = stringClaim(payload.azp)
   if (clientIdClaim && authorizedPartyClaim && clientIdClaim !== authorizedPartyClaim) {
+    debugLog(config.debugAuthLogs, 'auth.claims_rejected', {
+      reason: 'conflicting_client_claims',
+      clientId: clientIdClaim,
+      authorizedParty: authorizedPartyClaim,
+    })
     throw new ServiceError('Access token contains conflicting client claims', 401, 'AUTH_CLAIMS_INVALID')
   }
   const clientId = clientIdClaim ?? authorizedPartyClaim
   if (!subject || !issuer || !clientId) {
+    debugLog(config.debugAuthLogs, 'auth.claims_rejected', {
+      reason: 'missing_identity_claims',
+      hasSubject: Boolean(subject),
+      hasIssuer: Boolean(issuer),
+      hasClientId: Boolean(clientId),
+    })
     throw new ServiceError('Access token is missing required identity claims', 401, 'AUTH_CLAIMS_INVALID')
   }
 
   const scopes = parseScopes(payload.scope)
   const requiredScopes = options.requiredScopes ?? config.logtoRequiredScopes
   const missingScope = requiredScopes.find((scope) => !scopes.includes(scope))
-  if (missingScope) throw new ServiceError('Required permission is missing', 403, 'AUTH_SCOPE_FORBIDDEN')
+  debugLog(config.debugAuthLogs, 'auth.claims_parsed', {
+    issuer,
+    subjectHash: fingerprintForLog(subject),
+    clientId,
+    scopes,
+    requiredScopes,
+  })
+  if (missingScope) {
+    debugLog(config.debugAuthLogs, 'auth.claims_rejected', {
+      reason: 'missing_scope',
+      clientId,
+      missingScope,
+      scopes,
+    })
+    throw new ServiceError('Required permission is missing', 403, 'AUTH_SCOPE_FORBIDDEN')
+  }
 
   const email = stringClaim(payload.email)
   const username = stringClaim(payload.username) ?? stringClaim(payload.preferred_username)
   const name = stringClaim(payload.name) ?? username
-  const platform = config.logtoClientPlatforms.get(clientId)
-  if (!platform) throw new ServiceError('Application is not allowed', 403, 'AUTH_CLIENT_FORBIDDEN')
+  const client = config.logtoClientPlatforms.get(clientId)
+  if (!client) {
+    debugLog(config.debugAuthLogs, 'auth.client_rejected', {
+      clientId,
+      mappedClientCount: config.logtoClientPlatforms.size,
+    })
+    throw new ServiceError('Application is not allowed', 403, 'AUTH_CLIENT_FORBIDDEN')
+  }
 
   const role = resolveRole(scopes, config)
+  debugLog(config.debugAuthLogs, 'auth.identity_verified', {
+    issuer,
+    subjectHash: fingerprintForLog(subject),
+    clientId,
+    platform: client.platform,
+    clientType: client.clientType,
+    scopes,
+    role: role ?? null,
+  })
   return {
     issuer,
     subject,
     clientId,
-    platform,
+    platform: client.platform,
+    clientType: client.clientType,
     scopes,
     ...(email ? { email } : {}),
     ...(username ? { username } : {}),
