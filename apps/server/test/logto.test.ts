@@ -15,11 +15,16 @@ async function fixture() {
   publicJwk.kid = 'test-key'
   publicJwk.alg = 'ES384'
   const config = {
+    debugAuthLogs: false,
     logtoIssuer: issuer,
     logtoAudience: audience,
     logtoJwksUri: `${issuer}/jwks`,
     logtoRequiredScopes: ['ai:invoke'],
-    logtoClientPlatforms: new Map([['client-1', 'lingweave']]),
+    logtoClientPlatforms: new Map([['client-1', {
+      platform: 'lingweave',
+      clientType: 'web' as const,
+      webRedirects: new Map(),
+    }]]),
     logtoAdminScope: 'account:admin',
     logtoRootScope: 'account:root',
   }
@@ -55,6 +60,7 @@ test('accepts a valid Logto API access token and maps its client', async () => {
     subject: 'user-1',
     clientId: 'client-1',
     platform: 'lingweave',
+    clientType: 'web',
     scopes: ['openid', 'ai:invoke'],
     email: 'user@example.com',
     username: 'logto-user',

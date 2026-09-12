@@ -35,7 +35,7 @@ Content-Type: application/json
 5. 正确处理并发首次请求，不能创建重复用户或重复 Token。
 6. 当已存在 `users.oidc_id == subject` 的 Relay OIDC 用户时复用该用户；由 provisioning 新建用户时将 subject 写入 `users.oidc_id`。
 7. 对同一幂等键和同一身份返回相同绑定。
-8. `role` 只接受 `1` / `10` / `100`，并且只在首次创建用户时生效；不允许通过该接口更改已有用户角色、用户组或创建无限额度 Token。
+8. `role` 只接受 `1` / `10` / `100`，并且只在首次创建用户时生效；不允许通过该接口更改已有用户角色或用户组。桥接 Token 的 Key 闸门为无限额度，但实际请求仍受用户钱包或订阅额度计费约束。
 9. `sync_profile=true` 只允许同步不冲突的 username 和 display name，不同步 role、group、quota 或凭证。
 10. 不记录 Authorization、完整 API Key 或请求中的身份敏感信息。
 
@@ -58,10 +58,20 @@ Content-Type: application/json
     "user_status": 1,
     "token_status": 1,
     "quota": 100000,
-    "quota_used": 1200
+    "quota_used": 1200,
+    "token_quota": 0,
+    "token_quota_used": 1200,
+    "token_unlimited_quota": false,
+    "quota_display_type": "CNY",
+    "quota_per_unit": 500000,
+    "usd_exchange_rate": 7,
+    "custom_currency_symbol": "¤",
+    "custom_currency_exchange_rate": 1
   }
 }
 ```
+
+`quota` 是 NewAPI 用户钱包的剩余原始额度，`quota_used` 是用户累计使用额度；`token_quota` 和 `token_quota_used` 是当前 Key 的剩余和累计使用额度。展示余额时，有限额 Key（`token_unlimited_quota=false`）优先使用 `token_quota`，即使它为 `0`；无限额 Key 才使用用户钱包 `quota`。金额换算使用响应中的展示配置。
 
 `api_key` 只返回给经过内部 Token 验证的 Account Service。Account Service 不会把它放进 `/api/account` 响应。
 

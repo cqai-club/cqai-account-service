@@ -3,24 +3,38 @@ import test from 'node:test'
 
 import { createApp } from '../src/app.js'
 import type { ServiceConfig } from '../src/config.js'
-import type { AccountResolver, TokenVerifier, VerifiedIdentity } from '../src/types.js'
+import type {
+  AccountResolver,
+  PaymentService,
+  TokenVerifier,
+  VerifiedIdentity,
+} from '../src/types.js'
 
 const identity: VerifiedIdentity = {
   issuer: 'https://auth.example.com/oidc',
   subject: 'user-1',
   clientId: 'client-1',
   platform: 'lingweave',
+  clientType: 'web',
   scopes: ['ai:invoke'],
 }
 
 const config: ServiceConfig = {
   port: 8787,
+  debugAuthLogs: false,
   corsAllowedOrigins: new Set(['https://app.example.com']),
   logtoIssuer: identity.issuer,
   logtoAudience: 'https://account.example.com',
   logtoJwksUri: 'https://auth.example.com/oidc/jwks',
   logtoRequiredScopes: ['ai:invoke'],
-  logtoClientPlatforms: new Map([['client-1', 'lingweave']]),
+  logtoClientPlatforms: new Map([['client-1', {
+    platform: 'lingweave',
+    clientType: 'web',
+    webRedirects: new Map([['https://app.example.com', {
+      successUrl: 'https://app.example.com/billing/result',
+      cancelUrl: 'https://app.example.com/billing/result?status=cancelled',
+    }]]),
+  }]]),
   logtoAdminScope: 'account:admin',
   logtoRootScope: 'account:root',
   newApiBaseUrl: 'https://new-api.example.com',
@@ -46,8 +60,19 @@ const accounts: AccountResolver = {
       tokenId: 7,
       platform: 'lingweave',
       apiKey: 'new-api-secret-key',
+      displayName: '王仔',
+      username: 'wangzai',
+      email: 'wangzai@example.com',
       quota: 1000,
       quotaUsed: 100,
+      tokenQuota: 0,
+      tokenQuotaUsed: 200,
+      tokenUnlimitedQuota: false,
+      quotaDisplayType: 'CNY',
+      quotaPerUnit: 500000,
+      usdExchangeRate: 7,
+      customCurrencySymbol: '¤',
+      customCurrencyExchangeRate: 1,
     }
   },
 }
@@ -118,8 +143,19 @@ test('returns public account data without exposing the NewAPI key', async () => 
       userId: 42,
       tokenId: 7,
       platform: 'lingweave',
+      displayName: '王仔',
+      username: 'wangzai',
+      email: 'wangzai@example.com',
       quota: 1000,
       quotaUsed: 100,
+      tokenQuota: 0,
+      tokenQuotaUsed: 200,
+      tokenUnlimitedQuota: false,
+      quotaDisplayType: 'CNY',
+      quotaPerUnit: 500000,
+      usdExchangeRate: 7,
+      customCurrencySymbol: '¤',
+      customCurrencyExchangeRate: 1,
     },
   })
 })
@@ -233,4 +269,297 @@ test('enforces the configured request body limit', async () => {
     body: '{}',
   })
   assert.equal(response.status, 413)
+})
+
+test('creates a top-up through the Logto-authenticated payment facade', async () => {
+  let received: { userId: number; provider: string; payload: Record<string, unknown> } | undefined
+  const payments: PaymentService = {
+    async getTopUpInfo() {
+      return { data: { payment_options: [{ id: 'card', name: 'Stripe', kind: 'amount' }] } }
+    },
+    async listTopUps() {
+      return { data: { items: [] } }
+    },
+    async createTopUp(userId, provider, payload) {
+      received = { userId, provider, payload }
+      return {
+        data: {
+          pid: '10001',
+          type: 'wxpay',
+          out_trade_no: 'trade-1',
+          notify_url: 'https://relay.example/notify',
+          return_url: 'http://127.0.0.1:3003/billing/result',
+          name: '账户充值',
+          money: '10.00',
+          sign: 'signature',
+          pay_link: 'https://pay.example/checkout',
+        },
+        url: 'https://pay.example/checkout',
+      }
+    },
+    async getSubscriptionPlans() {
+      return { data: [] }
+    },
+    async getSubscriptionSelf() {
+      return { data: {} }
+    },
+    async purchaseSubscription() {
+      return { data: null }
+    },
+  }
+  const app = createApp(config, { verifier, accounts, payments })
+  const response = await app.request('/api/billing/topups', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer logto-token',
+      Origin: 'https://app.example.com',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ payment_option_id: 'card', amount: 100 }),
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(received, {
+    userId: 42,
+    provider: 'stripe',
+    payload: {
+      amount: 100,
+      payment_method: 'stripe',
+      success_url: 'https://app.example.com/billing/result',
+      cancel_url: 'https://app.example.com/billing/result?status=cancelled',
+    },
+  })
+  assert.deepEqual(await response.json(), {
+    success: true,
+    data: {
+      payment_url: 'https://pay.example/checkout',
+      payment_fields: {
+        pid: '10001',
+        type: 'wxpay',
+        out_trade_no: 'trade-1',
+        notify_url: 'https://relay.example/notify',
+        return_url: 'http://127.0.0.1:3003/billing/result',
+        name: '账户充值',
+        money: '10.00',
+        sign: 'signature',
+      },
+      order_id: 'trade-1',
+    },
+  })
+})
+
+test('returns normalized top-up options from the payment facade', async () => {
+  const payments: PaymentService = {
+    async getTopUpInfo() {
+      return {
+        data: {
+          enable_online_topup: true,
+          pay_methods: [{ name: '微信', type: 'wxpay' }],
+          amount_options: [10, 20],
+        },
+      }
+    },
+    async listTopUps() {
+      return { data: { items: [] } }
+    },
+    async createTopUp() {
+      return { data: {} }
+    },
+    async getSubscriptionPlans() {
+      return { data: [] }
+    },
+    async getSubscriptionSelf() {
+      return { data: {} }
+    },
+    async purchaseSubscription() {
+      return { data: null }
+    },
+  }
+  const app = createApp(config, { verifier, accounts, payments })
+  const response = await app.request('/api/billing/topup/info', {
+    headers: { Authorization: 'Bearer logto-token' },
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    success: true,
+    data: {
+      payment_options: [{ id: 'online-wxpay', name: '微信', kind: 'amount' }],
+      amount_options: [10, 20],
+    },
+  })
+})
+
+test('uses the client and origin payment redirect configuration', async () => {
+  let receivedPayload: Record<string, unknown> | undefined
+  const payments: PaymentService = {
+    async getTopUpInfo() {
+      return { data: { payment_options: [{ id: 'card', name: 'Stripe', kind: 'amount' }] } }
+    },
+    async listTopUps() {
+      return { data: {} }
+    },
+    async createTopUp(_userId, _provider, payload) {
+      receivedPayload = payload
+      return { data: { pay_link: 'https://pay.example/checkout' } }
+    },
+    async getSubscriptionPlans() {
+      return { data: [] }
+    },
+    async getSubscriptionSelf() {
+      return { data: {} }
+    },
+    async purchaseSubscription() {
+      return { data: null }
+    },
+  }
+  const app = createApp(config, { verifier, accounts, payments })
+  const response = await app.request('/api/billing/topups', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer logto-token',
+      Origin: 'https://app.example.com',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      amount: 100,
+      payment_option_id: 'card',
+    }),
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(receivedPayload, {
+    amount: 100,
+    payment_method: 'stripe',
+    success_url: 'https://app.example.com/billing/result',
+    cancel_url: 'https://app.example.com/billing/result?status=cancelled',
+  })
+})
+
+test('rejects unsafe top-up payloads before calling the payment service', async () => {
+  let called = false
+  const payments: PaymentService = {
+    async getTopUpInfo() {
+      return { data: { payment_options: [{ id: 'card', name: 'Stripe', kind: 'amount' }] } }
+    },
+    async listTopUps() {
+      return { data: {} }
+    },
+    async createTopUp() {
+      called = true
+      return { data: {} }
+    },
+    async getSubscriptionPlans() {
+      return { data: [] }
+    },
+    async getSubscriptionSelf() {
+      return { data: {} }
+    },
+    async purchaseSubscription() {
+      return { data: null }
+    },
+  }
+  const app = createApp(config, { verifier, accounts, payments })
+  const response = await app.request('/api/billing/topups', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer logto-token',
+      Origin: 'https://app.example.com',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ payment_option_id: 'card', amount: 100_000_001 }),
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(called, false)
+  assert.deepEqual(await response.json(), {
+    success: false,
+    code: 'INVALID_PAYMENT_REQUEST',
+    message: 'Invalid payment request',
+  })
+})
+
+test('rejects client-supplied payment redirects', async () => {
+  let called = false
+  const payments: PaymentService = {
+    async getTopUpInfo() {
+      return { data: { payment_options: [{ id: 'card', name: 'Stripe', kind: 'amount' }] } }
+    },
+    async listTopUps() { return { data: {} } },
+    async createTopUp() {
+      called = true
+      return { data: {} }
+    },
+    async getSubscriptionPlans() { return { data: [] } },
+    async getSubscriptionSelf() { return { data: {} } },
+    async purchaseSubscription() { return { data: null } },
+  }
+  const app = createApp(config, { verifier, accounts, payments })
+  const response = await app.request('/api/billing/topups', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer logto-token',
+      Origin: 'https://app.example.com',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      payment_option_id: 'card',
+      amount: 100,
+      success_url: 'https://evil.example.com/result',
+    }),
+  })
+
+  assert.equal(response.status, 400)
+  assert.equal(called, false)
+  assert.deepEqual(await response.json(), {
+    success: false,
+    code: 'PAYMENT_REDIRECT_OVERRIDE_FORBIDDEN',
+    message: 'Payment redirect is controlled by the Account Service',
+  })
+})
+
+test('selects a desktop payment redirect without an Origin header', async () => {
+  let receivedPayload: Record<string, unknown> | undefined
+  const desktopConfig = {
+    ...config,
+    logtoClientPlatforms: new Map([['client-1', {
+      platform: 'cqai-desktop',
+      clientType: 'desktop' as const,
+      webRedirects: new Map(),
+      desktopRedirect: {
+        successUrl: 'cqai://payment/result',
+        cancelUrl: 'cqai://payment/result?status=cancelled',
+      },
+    }]]),
+  }
+  const payments: PaymentService = {
+    async getTopUpInfo() {
+      return { data: { payment_options: [{ id: 'card', name: 'Stripe', kind: 'amount' }] } }
+    },
+    async listTopUps() { return { data: {} } },
+    async createTopUp(_userId, _provider, payload) {
+      receivedPayload = payload
+      return { data: {} }
+    },
+    async getSubscriptionPlans() { return { data: [] } },
+    async getSubscriptionSelf() { return { data: {} } },
+    async purchaseSubscription() { return { data: null } },
+  }
+  const app = createApp(desktopConfig, { verifier, accounts, payments })
+  const response = await app.request('/api/billing/topups', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer logto-token',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ payment_option_id: 'card', amount: 100 }),
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(receivedPayload, {
+    amount: 100,
+    payment_method: 'stripe',
+    success_url: 'cqai://payment/result',
+    cancel_url: 'cqai://payment/result?status=cancelled',
+  })
 })

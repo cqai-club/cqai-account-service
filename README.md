@@ -26,8 +26,9 @@ packages/client-sdk/  面向浏览器应用的轻量 SDK
 - Logto Client ID 到内部 `platform` 的可信映射。
 - 从已验证 Access Token 读取 email、username/preferred_username 和 name，用于 Relay 首次 provisioning，不额外调用 UserInfo。
 - 精确来源 CORS 白名单，不使用跨域 Cookie。
-- `GET /api/account` 安全账号摘要，响应不包含 NewAPI Key。
+- `GET /api/account` 安全账号摘要，包含已验证的用户姓名、用户名、邮箱和账号额度，响应不包含 NewAPI Key。
 - `GET /api/client-credential` 面向受信任客户端的凭证交换接口，要求 Logto Access Token 且拒绝带 `Origin` 的浏览器请求；返回 Relay 地址和该用户的平台 API Key。
+- `GET/POST /api/billing/*` 面向 Logto 用户的支付门面，转发充值和订阅操作到 Relay；浏览器不会接触 NewAPI 登录态、Service Token 或 API Key。
 - `/v1/*` 到 NewAPI 的请求代理和流式响应透传。
 - 请求体大小限制、敏感请求头替换和敏感响应头过滤。
 - 可选 Redis 缓存；未配置 `REDIS_URL` 时使用进程内存缓存，Key 以 AES-256-GCM 加密后写入 Redis。
@@ -35,9 +36,22 @@ packages/client-sdk/  面向浏览器应用的轻量 SDK
 `cqai-relay` 已实现并注册 SDK 约定的 `POST /api/internal/provision`，由 `NEW_API_INTERNAL_TOKEN` 保护；接口合同见 [docs/new-api-provision-contract.md](docs/new-api-provision-contract.md)。
 在当前单一 Logto issuer 下，Relay 会通过 `users.oidc_id == subject` 让原生 OIDC 登录与 Account Service provisioning 复用同一本地用户；管理面 Session 与业务 Access Token 仍保持独立。
 
+### 支付门面
+
+浏览器使用 `@cqaiclub/account-client` 的 `getTopUpInfo`、`listTopUps`、`createTopUp`、
+`getSubscriptionPlans`、`getSubscriptionSelf` 和 `purchaseSubscription` 方法。充值先从
+`getTopUpInfo()` 获取 Account Service 归一化的 `payment_options`，再提交 `payment_option_id`；请求只携带 Logto
+Access Token 和经过白名单校验的支付参数；Account Service 从已验证身份解析 NewAPI 用户后，通过
+`NEW_API_INTERNAL_TOKEN` 调用 Relay 的 `/api/internal/payment/*`。支付渠道配置、订单记录、webhook
+验签以及充值/订阅入账仍由 Relay 负责。
+
+当前 Relay 的支付创建接口会生成新订单号，客户端 SDK 不宣称支付创建具备幂等重试语义。上线前如果
+业务需要自动重试，必须先在 Relay 订单表和各支付适配器之间增加持久化幂等键，不能依赖浏览器或
+Account Service 进程内状态。
+
 ## 配置方式
 
-本项目不提供运行时管理页。所有服务端配置来自环境变量，生产环境统一由 GitHub Actions Repository Variables 和 Secrets 在部署时写入以下文件：
+本项目不提供运行时管理页。所有服务端配置来自环境变量，生产环境统一由 GitHub Actions 的 Environment Variables 和 Secrets 在部署时写入以下文件：
 
 ```text
 apps/server/.env.actions
@@ -45,7 +59,7 @@ apps/server/.env.actions
 
 该文件权限为 `0600`、不会提交到 Git，启动时覆盖 `.env` 中的同名旧值。
 
-### GitHub Actions Secrects
+### GitHub Actions Secrets
 
 以下值必须放在 Repository Secrets，绝不能放进 Variables、日志或仓库文件：
 
@@ -60,9 +74,9 @@ apps/server/.env.actions
 其中 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_SSH_KEY`
 放在 `production` 环境的 Secrets 中；`NEW_API_INTERNAL_TOKEN` 可放在仓库级 Secrets。
 
-### GitHub Actions Variables
+### GitHub Actions Environment Variables
 
-Repository Variables 至少需要配置：
+生产环境 Variables 至少需要配置：
 
 - `LOGTO_ISSUER`
 - `LOGTO_AUDIENCE`
@@ -82,8 +96,8 @@ Repository Variables 至少需要配置：
 示例：
 
 ```text
-CORS_ALLOWED_ORIGINS=https://cqai-club.github.io
-LOGTO_CLIENT_PLATFORM_MAP={"l0odswrhnwfu31ikpa5bb":"lingweave"}
+CORS_ALLOWED_ORIGINS=https://cqai-club.github.io,http://127.0.0.1:3003,http://localhost:3003
+LOGTO_CLIENT_PLATFORM_MAP={"web-client-id":{"platform":"lingweave","client_type":"web","redirects":{"https://cqai-club.github.io":{"success_url":"https://cqai-club.github.io/lingweave/billing/result","cancel_url":"https://cqai-club.github.io/lingweave/billing/result?status=cancelled"},"http://127.0.0.1:3003":{"success_url":"http://127.0.0.1:3003/billing/result","cancel_url":"http://127.0.0.1:3003/billing/result?status=cancelled"}}},"desktop-client-id":{"platform":"cqai-desktop","client_type":"desktop","redirects":{"success_url":"cqai://payment/result","cancel_url":"cqai://payment/result?status=cancelled"}}}
 ```
 
 ## Logto 配置
@@ -93,11 +107,13 @@ LOGTO_CLIENT_PLATFORM_MAP={"l0odswrhnwfu31ikpa5bb":"lingweave"}
 3. 每个下游产品使用独立的 Logto SPA Application。
 4. 下游应用请求上述 API Resource 的 Access Token。
 5. 下游如需将用户资料传入首次 provisioning，授权时同时请求 Logto `profile` 和 `email` 用户 scope。
-6. 将 SPA 的 Client ID 通过 `LOGTO_CLIENT_PLATFORM_MAP` 映射为固定平台名。
+6. 将每个 Logto Client ID 通过 `LOGTO_CLIENT_PLATFORM_MAP` 映射为固定平台、客户端类型和支付回跳地址。
 
 ```env
-LOGTO_CLIENT_PLATFORM_MAP={"lingweave-logto-client-id":"lingweave","image-app-client-id":"image-app"}
+LOGTO_CLIENT_PLATFORM_MAP={"lingweave-logto-client-id":{"platform":"lingweave","client_type":"web","redirects":{"https://cqai-club.github.io":{"success_url":"https://cqai-club.github.io/lingweave/billing/result","cancel_url":"https://cqai-club.github.io/lingweave/billing/result?status=cancelled"}}},"cqai-desktop-client-id":{"platform":"cqai-desktop","client_type":"desktop","redirects":{"success_url":"cqai://payment/result","cancel_url":"cqai://payment/result?status=cancelled"}}}
 ```
+
+网页请求使用已通过 CORS 校验的精确 `Origin` 选择回跳地址；桌面客户端使用固定自定义协议，不依赖 `Origin`。未配置的 Client、Origin 或回跳地址会被拒绝。充值请求本身不接受 `success_url`、`cancel_url` 或 `return_url`，避免客户端覆盖服务端策略。
 
 不能接受浏览器传入的任意 `platform`，否则一个应用可能冒充另一个应用并使用其额度。
 
@@ -108,11 +124,12 @@ LOGTO_CLIENT_PLATFORM_MAP={"lingweave-logto-client-id":"lingweave","image-app-cl
 | 变量 | 用途 |
 |---|---|
 | `PORT` | 监听端口，默认 `8787` |
+| `DEBUG_AUTH_LOGS` | 临时输出脱敏的认证、账号 provisioning 和下游请求诊断日志，默认 `0` |
 | `LOGTO_ISSUER` | Logto Token issuer，通常以 `/oidc` 结尾 |
 | `LOGTO_AUDIENCE` | Account Service 对应的 API Resource indicator |
 | `LOGTO_JWKS_URI` | JWKS 地址，通常由 issuer 推导 |
 | `LOGTO_REQUIRED_SCOPES` | 调用所需 scope，默认 `ai:invoke` |
-| `LOGTO_CLIENT_PLATFORM_MAP` | Client ID 到 platform 的 JSON 映射 |
+| `LOGTO_CLIENT_PLATFORM_MAP` | Client ID 到 platform、`client_type` 和支付回跳配置的 JSON 映射；Web 回跳 Origin 必须同时出现在 `CORS_ALLOWED_ORIGINS` |
 | `CORS_ALLOWED_ORIGINS` | 允许跨域的浏览器来源 |
 | `NEW_API_BASE_URL` | NewAPI 服务端地址（业务接口未配置时返回 503） |
 | `NEW_API_INTERNAL_TOKEN` | NewAPI provisioning 内部令牌（不能为空、不能写入变量） |
