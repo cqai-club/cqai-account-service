@@ -1,0 +1,42 @@
+name: Verify managed video
+on:
+  pull_request:
+  push:
+    branches: [codex/ejianbao-managed-video]
+permissions:
+  contents: read
+jobs:
+  account:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+  relay-plugin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: account
+      - uses: actions/checkout@v4
+        with:
+          repository: cqai-club/cqai-relay
+          ref: 65f210d275238f44d6ebc8ffd97f6a7d871ba700
+          path: relay
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.sum
+      - name: Validate in the actual Relay plugin runtime
+        working-directory: relay
+        run: |
+          mkdir -p cmd/ejianbao-verify
+          cp ../account/integrations/relay-check/main.go cmd/ejianbao-verify/main.go
+          go run ./cmd/ejianbao-verify ../account/integrations/relay/ejianbao.plugin.js

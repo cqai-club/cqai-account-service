@@ -92,6 +92,10 @@ jobs:
       ACCOUNT_CACHE_TTL_SECONDS: ${{ vars.ACCOUNT_CACHE_TTL_SECONDS || '300' }}
       MAX_REQUEST_BODY_BYTES: ${{ vars.MAX_REQUEST_BODY_BYTES || '20971520' }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
+      EJIANBAO_ENABLED: ${{ vars.EJIANBAO_ENABLED || '0' }}
+      EJIANBAO_QUOTA_PER_SECOND: ${{ vars.EJIANBAO_QUOTA_PER_SECOND }}
+      INFERFLOW_BASE_URL: ${{ vars.INFERFLOW_BASE_URL || 'https://saas.inferflow.dev/openapi/v1' }}
+      INFERFLOW_API_KEY: ${{ secrets.INFERFLOW_API_KEY }}
       IMAGE_TAG: ${{ github.sha }}
       CONTAINER_NAME: cqai-account-service
       LEGACY_SERVICE_NAME: ${{ vars.LEGACY_SERVICE_NAME || 'cqai-account-service' }}
@@ -115,6 +119,10 @@ jobs:
           test -n "$MAX_REQUEST_BODY_BYTES"
           test -n "$NEW_API_INTERNAL_TOKEN"
           [[ "$ACCOUNT_SERVICE_PORT" =~ ^[0-9]+$ ]]
+          if [[ "$EJIANBAO_ENABLED" == "1" ]]; then
+            test -n "$INFERFLOW_API_KEY"
+            [[ "$EJIANBAO_QUOTA_PER_SECOND" =~ ^[1-9][0-9]*$ ]]
+          fi
 
       - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -133,7 +141,7 @@ jobs:
 
       - name: Sync runtime configuration
         run: |
-          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS CLIENT_DEFAULT_MODEL LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ADMIN_SCOPE LOGTO_ROOT_SCOPE ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN; do
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS CLIENT_DEFAULT_MODEL LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ADMIN_SCOPE LOGTO_ROOT_SCOPE ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN EJIANBAO_ENABLED EJIANBAO_QUOTA_PER_SECOND INFERFLOW_BASE_URL INFERFLOW_API_KEY; do
             value="${!name}"
             if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
               echo "$name must be a single-line value" >&2
@@ -156,6 +164,13 @@ jobs:
             printf 'ACCOUNT_CACHE_TTL_SECONDS=%s\n' "$ACCOUNT_CACHE_TTL_SECONDS"
             printf 'MAX_REQUEST_BODY_BYTES=%s\n' "$MAX_REQUEST_BODY_BYTES"
             printf 'NEW_API_INTERNAL_TOKEN=%s\n' "$NEW_API_INTERNAL_TOKEN"
+            printf 'EJIANBAO_ENABLED=%s\n' "$EJIANBAO_ENABLED"
+            if [[ "$EJIANBAO_ENABLED" == "1" ]]; then
+              printf 'EJIANBAO_DATABASE=/app/data/video.sqlite\n'
+              printf 'EJIANBAO_QUOTA_PER_SECOND=%s\n' "$EJIANBAO_QUOTA_PER_SECOND"
+              printf 'INFERFLOW_BASE_URL=%s\n' "$INFERFLOW_BASE_URL"
+              printf 'INFERFLOW_API_KEY=%s\n' "$INFERFLOW_API_KEY"
+            fi
             if [[ -n "$REDIS_URL" ]]; then
               printf 'REDIS_URL=%s\n' "$REDIS_URL"
             fi
@@ -230,6 +245,7 @@ jobs:
               --name "$CONTAINER_NAME" \
               --restart unless-stopped \
               --network host \
+              --mount type=volume,source=cqai-account-video,target=/app/data \
               --env-file "$env_file" \
               --env "PORT=${ACCOUNT_SERVICE_PORT}" \
               "$current_ref" >/dev/null

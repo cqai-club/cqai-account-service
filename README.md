@@ -20,6 +20,8 @@ packages/client-sdk/  面向浏览器应用的轻量 SDK
 
 ## 当前状态
 
+e剪宝平台托管生成、充值积分设置和部署验收参见 [运营与部署说明](docs/ejianbao-operations.md)。普通用户使用产品账户，InferFlow 平台 Key 仅保存在服务端；新接口默认关闭，需先配置 Relay 插件与计费。
+
 服务端已经包含：
 
 - Logto JWT 的 JWKS 签名、issuer、audience、有效期、scope 校验。

@@ -29,6 +29,9 @@ COPY --from=build /app/apps/server/dist ./apps/server/dist
 
 EXPOSE 8787
 
+RUN mkdir -p /app/data && chown node:node /app/data
+VOLUME ["/app/data"]
+
 USER node
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
