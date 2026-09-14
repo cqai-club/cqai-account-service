@@ -124,7 +124,7 @@ export function createApp(config: ServiceConfig, dependencies: AppDependencies) 
   app.get('/api/account', async (c) => {
     const requestId = c.get('requestId')
     debugLog(config.debugAuthLogs, 'account.endpoint_started', { requestId })
-    const account = await dependencies.accounts.resolve(c.get('identity'))
+    const account = await dependencies.accounts.resolve(c.get('identity'), { bypassCache: true })
     const data: PublicAccount = {
       userId: account.userId,
       platform: account.platform,

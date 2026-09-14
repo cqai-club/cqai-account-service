@@ -98,6 +98,31 @@ test('falls back to provisioning when the cache is disabled', async () => {
   assert.equal(calls, 2)
 })
 
+test('bypasses and refreshes a cached account on demand', async () => {
+  let calls = 0
+  const resolver = new NewApiAccountResolver(
+    config,
+    {
+      async provision() {
+        calls += 1
+        return { userId: 42, tokenId: 7, apiKey: 'sk-secret', quota: calls * 100 }
+      },
+    },
+    new MemoryAccountCache(),
+  )
+
+  const first = await resolver.resolve(identity)
+  const cached = await resolver.resolve(identity)
+  const refreshed = await resolver.resolve(identity, { bypassCache: true })
+  const refreshedCache = await resolver.resolve(identity)
+
+  assert.equal(calls, 2)
+  assert.equal(first.quota, 100)
+  assert.equal(cached.quota, 100)
+  assert.equal(refreshed.quota, 200)
+  assert.equal(refreshedCache.quota, 200)
+})
+
 test('fails closed when provisioning does not return a relay key', async () => {
   const resolver = new NewApiAccountResolver(config, {
     async provision() {

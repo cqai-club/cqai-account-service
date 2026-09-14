@@ -6,7 +6,7 @@ import type { AccountCache } from './cache.js'
 import type { ServiceConfig } from './config.js'
 import { debugLog, fingerprintForLog, safeErrorMetadata } from './diagnostics.js'
 import { ServiceError } from './errors.js'
-import type { AccountResolver, ResolvedAccount, VerifiedIdentity } from './types.js'
+import type { AccountResolveOptions, AccountResolver, ResolvedAccount, VerifiedIdentity } from './types.js'
 
 type NewApiProvisioner = Pick<NewApiClient, 'provision'>
 type AccountResolverConfig = Pick<
@@ -25,7 +25,7 @@ export class NewApiAccountResolver implements AccountResolver {
     this.injectedClient = client
   }
 
-  async resolve(identity: VerifiedIdentity): Promise<ResolvedAccount> {
+  async resolve(identity: VerifiedIdentity, options?: AccountResolveOptions): Promise<ResolvedAccount> {
     const startedAt = Date.now()
     debugLog(this.config.debugAuthLogs, 'account.resolve_started', {
       subjectHash: fingerprintForLog(identity.subject),
@@ -37,7 +37,7 @@ export class NewApiAccountResolver implements AccountResolver {
     }
 
     const cacheKey = `${identity.issuer}\u0000${identity.subject}\u0000${identity.platform}`
-    const cached = await this.cache?.get(cacheKey)
+    const cached = options?.bypassCache ? undefined : await this.cache?.get(cacheKey)
     if (this.config.accountCacheTtlMs > 0 && cached) {
       debugLog(this.config.debugAuthLogs, 'account.cache_hit', {
         platform: identity.platform,

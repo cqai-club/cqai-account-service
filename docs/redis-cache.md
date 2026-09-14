@@ -27,6 +27,8 @@ redis://:<password>@127.0.0.1:6380/0
 
 缓存键是 `issuer + subject + platform` 的 SHA-256。缓存值包含用户 ID、平台、Token ID、配额和 NewAPI Key，写入 Redis 前使用 AES-256-GCM 加密；加密密钥从 `NEW_API_INTERNAL_TOKEN` 派生。Redis 中不会出现 Key 明文。Redis 临时故障时自动回退到内存，不阻塞业务请求。
 
+`GET /api/account` 会绕过账号缓存读取最新摘要并回写缓存，确保充值后的手动刷新能立即看到新额度；AI 代理和其他内部账号解析仍复用缓存，避免每次调用都重新 provisioning。
+
 ## 备份与清理
 
 - 使用 `appendonly yes` 确保持久化；备份 Redis 数据卷按 Redis 官方流程执行。

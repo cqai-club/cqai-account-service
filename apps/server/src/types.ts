@@ -68,8 +68,12 @@ export interface TokenVerificationOptions {
   requiredScopes?: readonly string[]
 }
 
+export interface AccountResolveOptions {
+  bypassCache?: boolean
+}
+
 export interface AccountResolver {
-  resolve(identity: VerifiedIdentity): Promise<ResolvedAccount>
+  resolve(identity: VerifiedIdentity, options?: AccountResolveOptions): Promise<ResolvedAccount>
 }
 
 export type TopUpProvider = 'epay' | 'stripe' | 'creem' | 'waffo' | 'waffo-pancake'

@@ -130,11 +130,19 @@ test('client-credential rejects every browser Origin, including allowlisted orig
 })
 
 test('returns public account data without exposing the NewAPI key', async () => {
-  const app = createApp(config, { verifier, accounts })
+  let bypassedCache = false
+  const freshAccounts: AccountResolver = {
+    async resolve(actualIdentity, options) {
+      bypassedCache = options?.bypassCache === true
+      return accounts.resolve(actualIdentity)
+    },
+  }
+  const app = createApp(config, { verifier, accounts: freshAccounts })
   const response = await app.request('/api/account', {
     headers: { Authorization: 'Bearer logto-token' },
   })
   assert.equal(response.status, 200)
+  assert.equal(bypassedCache, true)
   const body = await response.text()
   assert.doesNotMatch(body, /new-api-secret-key/)
   assert.deepEqual(JSON.parse(body), {
