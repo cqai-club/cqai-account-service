@@ -265,6 +265,56 @@ test('replaces browser authorization and streams the NewAPI response', async () 
   assert.match(await response.text(), /\[DONE\]/)
 })
 
+test('passes OpenRouter-style model metadata through without rewriting it', async () => {
+  const catalog = {
+    success: true,
+    total_count: 1,
+    links: { next: null },
+    data: [{
+      id: 'vision-model',
+      canonical_slug: 'openai/vision-model-20260915',
+      name: 'Vision Model',
+      owned_by: 'relay',
+      architecture: {
+        modality: 'text+image+sensor->text',
+        input_modalities: ['text', 'image', 'sensor'],
+        output_modalities: ['text'],
+      },
+      supported_parameters: ['tools', 'future_parameter'],
+      context_length: 1050000,
+      categories: ['text-multimodal'],
+      supported_endpoint_types: ['openai', 'openai-response'],
+    }],
+  }
+  const catalogBody = JSON.stringify(catalog, null, 2)
+  let upstreamUrl = ''
+  let upstreamAuthorization = ''
+  const app = createApp(config, {
+    verifier,
+    accounts,
+    fetch: async (input, init) => {
+      const request = new Request(input, init)
+      upstreamUrl = request.url
+      upstreamAuthorization = request.headers.get('authorization') ?? ''
+      return new Response(catalogBody, {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    },
+  })
+
+  const response = await app.request('/v1/models', {
+    headers: { Authorization: 'Bearer logto-token' },
+  })
+
+  assert.equal(response.status, 200)
+  assert.equal(upstreamUrl, 'https://new-api.example.com/v1/models')
+  assert.equal(upstreamAuthorization, 'Bearer new-api-secret-key')
+  assert.deepEqual(
+    new Uint8Array(await response.arrayBuffer()),
+    new TextEncoder().encode(catalogBody),
+  )
+})
+
 test('enforces the configured request body limit', async () => {
   const app = createApp(config, { verifier, accounts })
   const response = await app.request('/v1/chat/completions', {
