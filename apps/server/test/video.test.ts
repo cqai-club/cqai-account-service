@@ -11,8 +11,8 @@ import type { VerifiedIdentity } from '../src/types.js'
 
 const identity: VerifiedIdentity = {issuer: 'https://issuer.test', subject: 'user1', platform: 'desktop', clientId: 'app', clientType: 'desktop', scopes: ['ai:invoke']}
 const account = {userId: 1, platform: 'desktop', apiKey: 'relay-private-key', quota: 100000}
-function material(quoteId: string) {
-  const form = new FormData(); form.set('quoteId', quoteId); form.set('script', '测试文案')
+function material(quoteId: string, script = '测试文案') {
+  const form = new FormData(); form.set('quoteId', quoteId); form.set('script', script)
   form.set('avatar', new File([new Uint8Array([137,80,78,71,13,10,26,10,0])], '头像.png'))
   form.set('voice', new File(['0000ftypM4A 0000'], '参考录音.m4a'))
   return form
@@ -22,7 +22,10 @@ test('account gateway uploads, creates once across restart, enforces ownership, 
   const request: typeof fetch = async (url, init) => {
     const path = String(url)
     if (path.includes('/digital-human/')) {
-      uploads++; assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer vendor-private-key')
+      uploads++
+      const vendorHeaders = new Headers(init?.headers)
+      assert.equal(vendorHeaders.get('x-api-key'), 'vendor-private-key')
+      assert.equal(vendorHeaders.get('authorization'), null)
       return Response.json(path.endsWith('avatars') ? {avatar_id: 'a1'} : {voice_id: 'v1'})
     }
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer relay-private-key')
@@ -35,11 +38,12 @@ test('account gateway uploads, creates once across restart, enforces ownership, 
   const appConfig = loadConfig({LOGTO_ISSUER: identity.issuer, LOGTO_AUDIENCE: 'audience'})
   const app = () => createApp(appConfig, {video: service, verifier: {verify: async token => ({...identity, subject: token === 'other' ? 'user2' : 'user1'})}, accounts: {resolve: async () => account}})
   const headers = {authorization: 'Bearer user'}
+  const script = '第一段。\n\n第二段。\n第三段。'
   try {
     assert.equal((await app().request('/v1/ejianbao/quotes', {method: 'POST', body: '{}'})).status, 401)
-    const quoted = await app().request('/v1/ejianbao/quotes', {method: 'POST', headers, body: JSON.stringify({script: '测试文案'})})
+    const quoted = await app().request('/v1/ejianbao/quotes', {method: 'POST', headers, body: JSON.stringify({script})})
     const quote = await quoted.json() as {id: string; amount: number}; assert.equal(quote.amount, 100)
-    const create = () => app().request('/v1/ejianbao/runs', {method: 'POST', headers: {...headers, 'idempotency-key': 'local-job'}, body: material(quote.id)})
+    const create = () => app().request('/v1/ejianbao/runs', {method: 'POST', headers: {...headers, 'idempotency-key': 'local-job'}, body: material(quote.id, script)})
     const response = await create(); assert.equal(response.status, 201)
     const run = await response.json() as {id: string}
     service.close(); service = new VideoService(cfg, request)

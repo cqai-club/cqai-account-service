@@ -35,8 +35,9 @@ const safeId = (value: unknown): string => {
 }
 function owner(identity: VerifiedIdentity): string {return hash(JSON.stringify([identity.issuer, identity.subject, identity.platform]))}
 function scriptText(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > 5000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)) throw new ServiceError('Invalid video script', 400, 'VIDEO_INVALID')
-  return value.trim()
+  const text = typeof value === 'string' ? value.replace(/\r\n?/g, '\n') : ''
+  if (!text.trim() || text.length > 5000 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)) throw new ServiceError('Invalid video script', 400, 'VIDEO_INVALID')
+  return text.trim()
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ServiceError('Invalid service response', 502, 'VIDEO_UPSTREAM_INVALID')
@@ -129,7 +130,7 @@ export class VideoService {
   }
   private async upload(kind: 'avatars' | 'voices', file: File, key: string): Promise<string> {
     const form = new FormData(); form.set('file', file, file.name); form.set('name', 'ejianbao-' + key); form.set('authorization_confirmed', 'true')
-    const response = await this.request(`${this.config.inferflowUrl}/digital-human/${kind}`, {method: 'POST', headers: {Authorization: `Bearer ${this.config.inferflowKey}`, 'Idempotency-Key': key}, body: form, redirect: 'error', signal: AbortSignal.timeout(120000)})
+    const response = await this.request(`${this.config.inferflowUrl}/digital-human/${kind}`, {method: 'POST', headers: {'X-API-Key': this.config.inferflowKey, 'Idempotency-Key': key}, body: form, redirect: 'error', signal: AbortSignal.timeout(120000)})
     if (!response.ok) {await response.body?.cancel(); throw new Error('upload failed')}
     const data = object(await response.json()); return safeId(data[kind === 'avatars' ? 'avatar_id' : 'voice_id'])
   }
