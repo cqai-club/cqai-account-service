@@ -6,6 +6,7 @@ import { cors } from 'hono/cors'
 import { resolvePaymentRedirect, type ServiceConfig } from './config.js'
 import { debugLog, errorLog, safeErrorMetadata } from './diagnostics.js'
 import { ServiceError } from './errors.js'
+import type { VideoService } from './video.js'
 import {
   NewApiPaymentService,
   normalizeTopUpInfo,
@@ -33,6 +34,7 @@ export interface AppDependencies {
   accounts: AccountResolver
   payments?: PaymentService
   fetch?: typeof fetch
+  video?: VideoService
 }
 
 export function createApp(config: ServiceConfig, dependencies: AppDependencies) {
@@ -108,7 +110,7 @@ export function createApp(config: ServiceConfig, dependencies: AppDependencies) 
   app.use('/api/*', authenticate)
   app.use('/v1/*', authenticate)
   app.use('/v1/*', async (c, next) => {
-    const maximumBytes = config.maxRequestBodyBytes
+    const maximumBytes = c.req.path === '/v1/ejianbao/runs' && dependencies.video ? dependencies.video.config.maxUploadBytes * 2 + 65536 : config.maxRequestBodyBytes
     const declaredLength = Number(c.req.header('content-length'))
     if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
       return c.json(
@@ -236,6 +238,31 @@ export function createApp(config: ServiceConfig, dependencies: AppDependencies) 
         expiresAt: 0,
       },
     })
+  })
+
+  // Keep product routes ahead of the generic AI proxy; never forward an absent service.
+  app.all('/v1/ejianbao/*', async (c) => {
+    const video = dependencies.video
+    if (!video) throw new ServiceError('Managed video is not configured', 503, 'VIDEO_NOT_CONFIGURED')
+    const identity = c.get('identity')
+    c.header('Cache-Control', 'no-store')
+    if (c.req.method === 'POST' && c.req.path === '/v1/ejianbao/quotes') {
+      const bytes = await requestBody(c.req.raw, 30000)
+      let body: unknown
+      try {body = JSON.parse(new TextDecoder().decode(bytes))} catch {throw new ServiceError('Invalid quote request', 400, 'VIDEO_INVALID')}
+      return c.json(video.quote(identity, body, await dependencies.accounts.resolve(identity, {bypassCache: true})))
+    }
+    const account = await dependencies.accounts.resolve(identity, {bypassCache: true})
+    if (c.req.method === 'POST' && c.req.path === '/v1/ejianbao/runs') {
+      const bytes = await requestBody(c.req.raw, video.config.maxUploadBytes * 2 + 65536)
+      const form = await new Response(bytes, {headers: {'content-type': c.req.header('content-type') ?? ''}}).formData()
+      return c.json(await video.create(identity, account, c.req.header('idempotency-key') ?? '', form), 201)
+    }
+    const match = /^\/v1\/ejianbao\/runs\/([A-Za-z0-9_-]+)(\/video|\/cancel)?$/.exec(c.req.path)
+    if (match && c.req.method === 'GET' && !match[2]) return c.json(await video.status(identity, account, match[1]!))
+    if (match && c.req.method === 'GET' && match[2] === '/video') return video.download(identity, account, match[1]!)
+    if (match && c.req.method === 'POST' && match[2] === '/cancel') return video.cancel(identity, match[1]!)
+    throw new ServiceError('Video endpoint not found', 404, 'VIDEO_NOT_FOUND')
   })
 
   app.all('/v1/*', async (c) => {

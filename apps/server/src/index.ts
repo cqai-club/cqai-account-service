@@ -6,6 +6,7 @@ import { createAccountCache } from './cache.js'
 import { loadConfig } from './config.js'
 import { debugLog } from './diagnostics.js'
 import { LogtoTokenVerifier } from './logto.js'
+import { videoConfig, VideoService } from './video.js'
 
 const config = loadConfig()
 debugLog(config.debugAuthLogs, 'service.config_loaded', {
@@ -17,9 +18,12 @@ debugLog(config.debugAuthLogs, 'service.config_loaded', {
   newApiConfigured: Boolean(config.newApiBaseUrl && config.newApiInternalToken),
 })
 const accountCache = await createAccountCache(config)
+const managedVideoConfig = videoConfig()
+const video = managedVideoConfig ? new VideoService(managedVideoConfig) : undefined
 const app = createApp(config, {
   verifier: new LogtoTokenVerifier(config),
   accounts: new NewApiAccountResolver(config, undefined, accountCache),
+  ...(video ? {video} : {}),
 })
 
 const server = serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
@@ -28,6 +32,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
 
 const shutdown = () => {
   server.close(() => {
+    video?.close()
     accountCache.close().finally(() => process.exit(0))
   })
 }
