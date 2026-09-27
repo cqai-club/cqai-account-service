@@ -21,22 +21,21 @@
 
 2026-09-15 检查到线上公开配置：E=10、P=1、quota_per_unit=500000、显示为“积分”。这是基础比例 1 元=10 积分，实际支付仍取决于渠道、套餐与折扣。Stripe、Creem、Waffo 有各自价格配置，不能把易支付的 P 自动套用到其他渠道。
 
-若数字人售价为 S 积分/秒，用户组倍率为 1：
+数字人模型在 Relay 的 Model Pricing 中配置任务计费表达式。固定费用、按秒费用和用户组倍率都由 Relay 计算，Account Service 不复制计价表达式：
 
-- Relay 任务表达式：`u("seconds") * (S / E)`，部署时把括号换成计算后的十进制数。
-- Account Service：`EJIANBAO_QUOTA_PER_SECOND = S * quota_per_unit / E`，要求正整数。
-- 最低计费 10 秒，超过 10 秒按实际视频时长向上取整。
-- 两处价格需要同步修改。报价为预估，最终以 Relay 消费记录为准；分组倍率也影响最终费用。
+- Account Service 使用当前用户的 Relay Key 请求 `POST /v1/tasks/ejianbao/quote`，以 Relay 返回的预扣额度与 `quota_per_unit` 展示十分钟内的报价。
+- 脚本估算时长最低 10 秒、最高 1800 秒。任务完成后仍按实际视频时长向上取整结算。
+- Relay 报价和任务预扣使用同一计价规则；用户组倍率会影响两者。素材上传前重新核价，提交时 Relay 在预扣前核对 `expected_quota`。报价为预估，最终仍以 Relay 消费记录为准。
 
 此实现没有预设商业售价，也没有修改线上充值比例。
 
 ## 服务端部署
 
-1. 在 Relay 任务插件管理上传 integrations/relay/ejianbao.plugin.js。先测试再启用，不覆盖同名未知插件。
-2. 新建 type-59 Task Plugin 渠道，绑定插件 ejianbao、模型 ejianbao-digitalhuman；Base URL 为 https://saas.inferflow.dev/openapi/v1，Key 是运营方的 InferFlow 平台 Key。
-3. 在 Model Pricing 为该模型启用 tiered_expr 任务计费，填上面的按秒表达式。不要配置成普通文本 token 计费或固定按次计费。插件 seconds 为预估时长和实际完成时长。
+1. 在 Relay 任务插件管理确认 ejianbao 插件已启用；更新插件前核对线上绑定与版本。
+2. 新建 type-61 Task Plugin 渠道，绑定插件 ejianbao、模型 ejianbao-digitalhuman；Base URL 为 https://saas.inferflow.dev/openapi/v1，Key 是运营方的 InferFlow 平台 Key。
+3. 在 Model Pricing 为该模型启用 tiered_expr 任务计费，按商业售价配置表达式。不要配置成普通文本 token 计费。插件 seconds 为预估时长和实际完成时长。
 4. 在 Account Service GitHub Actions Secrets 配置 INFERFLOW_API_KEY，必须与 Relay 渠道 Key 相同。不能写入 Variables 或桌面安装包。
-5. Actions Variables 配置 EJIANBAO_ENABLED=1、EJIANBAO_QUOTA_PER_SECOND；Logto/NewAPI 配置复用原服务。发布受测代码后触发已有 Deploy 流程。
+5. 先部署支持只读报价和提交价格校验的 Relay，再在 Actions Variables 配置 EJIANBAO_ENABLED=1；Logto/NewAPI 配置复用原服务。发布受测代码后触发已有 Deploy 流程。旧 EJIANBAO_QUOTA_PER_SECOND 变量不再使用。
 6. Docker 使用持久卷 cqai-account-video:/app/data；SQLite 保存报价、用户归属和幂等映射，不保存原始照片、录音、Token 或厂商 Key。多副本不能使用各自独立数据库；水平扩容前必须迁移共享事务存储。
 7. 反向代理至少允许 101 MiB 请求体、超过 6 分钟的创建请求。服务端每份素材限制 50 MiB。
 8. 后端与 Relay 确认可用后再发布新桌面包。普通用户只登录平台并充值。

@@ -93,7 +93,6 @@ jobs:
       MAX_REQUEST_BODY_BYTES: ${{ vars.MAX_REQUEST_BODY_BYTES || '20971520' }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
       EJIANBAO_ENABLED: ${{ vars.EJIANBAO_ENABLED || '0' }}
-      EJIANBAO_QUOTA_PER_SECOND: ${{ vars.EJIANBAO_QUOTA_PER_SECOND }}
       INFERFLOW_BASE_URL: ${{ vars.INFERFLOW_BASE_URL || 'https://saas.inferflow.dev/openapi/v1' }}
       INFERFLOW_API_KEY: ${{ secrets.INFERFLOW_API_KEY }}
       IMAGE_TAG: ${{ github.sha }}
@@ -121,7 +120,6 @@ jobs:
           [[ "$ACCOUNT_SERVICE_PORT" =~ ^[0-9]+$ ]]
           if [[ "$EJIANBAO_ENABLED" == "1" ]]; then
             test -n "$INFERFLOW_API_KEY"
-            [[ "$EJIANBAO_QUOTA_PER_SECOND" =~ ^[1-9][0-9]*$ ]]
           fi
 
       - name: Start SSH agent
@@ -141,7 +139,7 @@ jobs:
 
       - name: Sync runtime configuration
         run: |
-          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS CLIENT_DEFAULT_MODEL LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ADMIN_SCOPE LOGTO_ROOT_SCOPE ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN EJIANBAO_ENABLED EJIANBAO_QUOTA_PER_SECOND INFERFLOW_BASE_URL INFERFLOW_API_KEY; do
+          for name in LOGTO_ISSUER LOGTO_AUDIENCE NEW_API_BASE_URL CORS_ALLOWED_ORIGINS CLIENT_DEFAULT_MODEL LOGTO_CLIENT_PLATFORM_MAP LOGTO_REQUIRED_SCOPES LOGTO_ADMIN_SCOPE LOGTO_ROOT_SCOPE ACCOUNT_CACHE_TTL_SECONDS MAX_REQUEST_BODY_BYTES NEW_API_INTERNAL_TOKEN EJIANBAO_ENABLED INFERFLOW_BASE_URL INFERFLOW_API_KEY; do
             value="${!name}"
             if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
               echo "$name must be a single-line value" >&2
@@ -167,7 +165,6 @@ jobs:
             printf 'EJIANBAO_ENABLED=%s\n' "$EJIANBAO_ENABLED"
             if [[ "$EJIANBAO_ENABLED" == "1" ]]; then
               printf 'EJIANBAO_DATABASE=/app/data/video.sqlite\n'
-              printf 'EJIANBAO_QUOTA_PER_SECOND=%s\n' "$EJIANBAO_QUOTA_PER_SECOND"
               printf 'INFERFLOW_BASE_URL=%s\n' "$INFERFLOW_BASE_URL"
               printf 'INFERFLOW_API_KEY=%s\n' "$INFERFLOW_API_KEY"
             fi
