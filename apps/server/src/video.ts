@@ -11,22 +11,20 @@ export interface VideoConfig {
   inferflowUrl: string
   inferflowKey: string
   relayUrl: string
-  quotaPerSecond: number
   maxUploadBytes: number
 }
 export function videoConfig(env = process.env): VideoConfig | undefined {
   if (env.EJIANBAO_ENABLED !== '1') return undefined
-  const rate = Number(env.EJIANBAO_QUOTA_PER_SECOND)
   const url = new URL(env.INFERFLOW_BASE_URL || 'https://saas.inferflow.dev/openapi/v1')
   if (!env.INFERFLOW_API_KEY || !env.EJIANBAO_DATABASE || !env.NEW_API_BASE_URL
-    || !Number.isSafeInteger(rate) || rate <= 0 || rate > 1000000
     || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
     throw new ServiceError('Managed video configuration is incomplete', 500, 'VIDEO_CONFIG_INVALID')
   }
   return {database: env.EJIANBAO_DATABASE, inferflowUrl: url.href.replace(/\/$/, ''), inferflowKey: env.INFERFLOW_API_KEY,
-    relayUrl: env.NEW_API_BASE_URL, quotaPerSecond: rate, maxUploadBytes: 50 * 1024 ** 2}
+    relayUrl: env.NEW_API_BASE_URL, maxUploadBytes: 50 * 1024 ** 2}
 }
-type Quote = {id: string; owner: string; scriptHash: string; amount: number; rate: number; seconds: number; expiresAt: string}
+type Quote = {id: string; owner: string; scriptHash: string; amount: number; quotaPerUnit: number; estimatedSeconds: number; pricingSource: 'relay'; expiresAt: string}
+type RelayQuote = {quota: number; quotaPerUnit: number; seconds: number}
 type Run = {id: string; owner: string; fingerprint: string; quoteId: string; createdAt: number; phase: 'preparing' | 'submitting' | 'submitted' | 'failed'; taskId?: string}
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex')
 const safeId = (value: unknown): string => {
@@ -53,21 +51,40 @@ export class VideoService {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS video_quotes (id TEXT PRIMARY KEY, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS video_runs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, request_key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(owner,request_key));')
   }
   close() {this.db.close()}
-  quote(identity: VerifiedIdentity, input: unknown, account?: ResolvedAccount) {
+  private async relayQuote(account: ResolvedAccount, seconds: number): Promise<RelayQuote> {
+    let response: Record<string, unknown>
+    try {
+      response = await this.relay().request<Record<string, unknown>>('/v1/tasks/ejianbao/quote', {
+        method: 'POST', apiKey: account.apiKey, body: {model: 'ejianbao-digitalhuman', seconds},
+      })
+    } catch {
+      // A failed or rate-limited Relay lookup must never fall back to local pricing.
+      throw new ServiceError('Relay video quote is unavailable', 503, 'VIDEO_QUOTE_UNAVAILABLE')
+    }
+    const quota = response.quota
+    const quotaPerUnit = response.quota_per_unit
+    const quotedSeconds = response.seconds
+    if (!Number.isSafeInteger(quota) || Number(quota) < 0 || !Number.isSafeInteger(quotaPerUnit)
+      || Number(quotaPerUnit) <= 0 || quotedSeconds !== seconds) {
+      throw new ServiceError('Relay returned an invalid video quote', 502, 'VIDEO_UPSTREAM_INVALID')
+    }
+    return {quota: Number(quota), quotaPerUnit: Number(quotaPerUnit), seconds}
+  }
+  async quote(identity: VerifiedIdentity, input: unknown, account: ResolvedAccount) {
     const script = scriptText(object(input).script)
     const seconds = Math.min(1800, Math.max(10, Math.ceil(Array.from(script).length / 3)))
-    const quote: Quote = {id: randomUUID(), owner: owner(identity), scriptHash: hash(script), seconds,
-      rate: this.config.quotaPerSecond, amount: seconds * this.config.quotaPerSecond, expiresAt: new Date(Date.now() + 10 * 60000).toISOString()}
+    const priced = await this.relayQuote(account, seconds)
+    const quote: Quote = {id: randomUUID(), owner: owner(identity), scriptHash: hash(script), estimatedSeconds: seconds,
+      amount: priced.quota, quotaPerUnit: priced.quotaPerUnit, pricingSource: 'relay', expiresAt: new Date(Date.now() + 10 * 60000).toISOString()}
     this.db.prepare('INSERT INTO video_quotes VALUES (?,?)').run(quote.id, JSON.stringify(quote))
-    const perUnit = account?.quotaPerUnit
+    const perUnit = quote.quotaPerUnit
     let displayAmount: string | undefined
-    if (perUnit && Number.isFinite(perUnit) && perUnit > 0) {
-      const usd = quote.amount / perUnit
-      if (account.quotaDisplayType === 'USD') displayAmount = '$' + usd.toFixed(4)
-      if (account.quotaDisplayType === 'CNY' && account.usdExchangeRate && Number.isFinite(account.usdExchangeRate) && account.usdExchangeRate > 0) displayAmount = '¥' + (usd * account.usdExchangeRate).toFixed(4)
-      if (account.quotaDisplayType === 'CUSTOM' && account.customCurrencyExchangeRate && Number.isFinite(account.customCurrencyExchangeRate) && account.customCurrencyExchangeRate > 0) displayAmount = (usd * account.customCurrencyExchangeRate).toFixed(4) + ' 积分'
-    }
-    return {id: quote.id, amount: quote.amount, unit: '额度单位（预估）', expiresAt: quote.expiresAt, ...(displayAmount ? {displayAmount} : {})}
+    const usd = quote.amount / perUnit
+    if (account.quotaDisplayType === 'USD') displayAmount = '$' + usd.toFixed(4)
+    if (account.quotaDisplayType === 'CNY' && account.usdExchangeRate && Number.isFinite(account.usdExchangeRate) && account.usdExchangeRate > 0) displayAmount = '¥' + (usd * account.usdExchangeRate).toFixed(4)
+    if (account.quotaDisplayType === 'CUSTOM' && account.customCurrencyExchangeRate && Number.isFinite(account.customCurrencyExchangeRate) && account.customCurrencyExchangeRate > 0) displayAmount = (usd * account.customCurrencyExchangeRate).toFixed(4) + ' 积分'
+    return {id: quote.id, amount: quote.amount, unit: '额度单位（预计预扣）', expiresAt: quote.expiresAt,
+      estimatedSeconds: quote.estimatedSeconds, pricingSource: quote.pricingSource, ...(displayAmount ? {displayAmount} : {})}
   }
   private readRun(identity: VerifiedIdentity, id: string): Run {
     const row = this.db.prepare('SELECT data FROM video_runs WHERE id=? AND owner=?').get(safeId(id), owner(identity))
@@ -101,7 +118,15 @@ export class VideoService {
     }
     const row = this.db.prepare('SELECT data FROM video_quotes WHERE id=?').get(quoteId)
     const quote = row ? JSON.parse(String(row.data)) as Quote : undefined
-    if (!quote || quote.owner !== subject || quote.scriptHash !== hash(script) || Date.parse(quote.expiresAt) <= Date.now()) throw new ServiceError('Quote expired or content changed', 409, 'VIDEO_QUOTE_EXPIRED')
+    const expiresAt = quote && typeof quote.expiresAt === 'string' ? Date.parse(quote.expiresAt) : NaN
+    if (!quote || quote.pricingSource !== 'relay' || quote.owner !== subject || quote.scriptHash !== hash(script)
+      || !Number.isSafeInteger(quote.amount) || quote.amount < 0 || !Number.isSafeInteger(quote.quotaPerUnit) || quote.quotaPerUnit <= 0
+      || !Number.isSafeInteger(quote.estimatedSeconds) || quote.estimatedSeconds < 10 || quote.estimatedSeconds > 1800
+      || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new ServiceError('Quote expired or content changed', 409, 'VIDEO_QUOTE_EXPIRED')
+    const currentPrice = await this.relayQuote(account, quote.estimatedSeconds)
+    if (currentPrice.quota !== quote.amount || currentPrice.quotaPerUnit !== quote.quotaPerUnit) {
+      throw new ServiceError('Video price changed; request a new quote', 409, 'VIDEO_QUOTE_CHANGED')
+    }
     // This is only an early UX check. Relay performs authoritative atomic reservation.
     const available = account.tokenUnlimitedQuota === false && account.tokenQuota !== undefined ? Math.min(account.quota ?? Infinity, account.tokenQuota) : account.quota
     if (available !== undefined && available < quote.amount) throw new ServiceError('Insufficient quota', 402, 'VIDEO_QUOTA_LOW')
@@ -112,13 +137,23 @@ export class VideoService {
     try {
       const avatarId = await this.upload('avatars', avatar!, run.id + '-avatar')
       const voiceId = await this.upload('voices', voice!, run.id + '-voice')
-      const envelope = JSON.stringify({avatar_id: avatarId, voice_id: voiceId, script_text: script, seconds: quote.seconds, rate: quote.rate, request_id: run.id})
+      if (expiresAt <= Date.now()) {
+        run.phase = 'failed'; this.save(run)
+        throw new ServiceError('Quote expired during material upload', 409, 'VIDEO_QUOTE_EXPIRED')
+      }
+      const envelope = JSON.stringify({avatar_id: avatarId, voice_id: voiceId, script_text: script, seconds: quote.estimatedSeconds, request_id: run.id})
       const signature = createHmac('sha256', this.config.inferflowKey).update(envelope).digest('hex')
       run.phase = 'submitting'; this.save(run)
-      const response = await this.relay().request<Record<string, unknown>>('/v1/tasks/ejianbao', {method: 'POST', apiKey: account.apiKey, body: {model: 'ejianbao-digitalhuman', envelope, signature}})
+      const response = await this.relay().request<Record<string, unknown>>('/v1/tasks/ejianbao', {method: 'POST', apiKey: account.apiKey,
+        body: {model: 'ejianbao-digitalhuman', envelope, signature, expected_quota: quote.amount}})
       run.taskId = safeId(response.task_id); run.phase = 'submitted'; this.save(run)
       return {id: run.id, status: 'queued', progress: 0}
     } catch (error) {
+      if (run.phase === 'failed' && error instanceof ServiceError && error.code === 'VIDEO_QUOTE_EXPIRED') throw error
+      if (run.phase === 'submitting' && error instanceof AiAccountError && error.status === 409 && error.code === 'task_quote_changed') {
+        run.phase = 'failed'; this.save(run)
+        throw new ServiceError('Video price changed; request a new quote', 409, 'VIDEO_QUOTE_CHANGED')
+      }
       if (run.phase === 'submitting' && error instanceof AiAccountError && [401, 402, 403, 404, 413, 422, 429].includes(error.status)) {
         run.phase = 'failed'; this.save(run)
         throw new ServiceError('Relay rejected video submission', error.status === 402 ? 402 : 502, error.status === 402 ? 'VIDEO_QUOTA_LOW' : 'VIDEO_SUBMISSION_REJECTED')

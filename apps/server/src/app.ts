@@ -250,7 +250,7 @@ export function createApp(config: ServiceConfig, dependencies: AppDependencies) 
       const bytes = await requestBody(c.req.raw, 30000)
       let body: unknown
       try {body = JSON.parse(new TextDecoder().decode(bytes))} catch {throw new ServiceError('Invalid quote request', 400, 'VIDEO_INVALID')}
-      return c.json(video.quote(identity, body, await dependencies.accounts.resolve(identity, {bypassCache: true})))
+      return c.json(await video.quote(identity, body, await dependencies.accounts.resolve(identity, {bypassCache: true})))
     }
     const account = await dependencies.accounts.resolve(identity, {bypassCache: true})
     if (c.req.method === 'POST' && c.req.path === '/v1/ejianbao/runs') {

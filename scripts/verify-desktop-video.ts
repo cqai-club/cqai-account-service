@@ -31,14 +31,19 @@ const testKey = 'fixture-platform-key-not-a-real-credential'
 const request: typeof fetch = async (url, init) => {
   const path = String(url)
   if (path.includes('/digital-human/')) {
-    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer ' + testKey)
+    assert.equal(new Headers(init?.headers).get('x-api-key'), testKey)
     uploads++
     return Response.json(path.endsWith('avatars') ? {avatar_id: 'fixture-avatar'} : {voice_id: 'fixture-voice'})
   }
   assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer fixture-relay-key')
   const context = {apiKey: testKey, baseUrl: 'https://fixture.invalid/openapi/v1'}
+  if (path.endsWith('/v1/tasks/ejianbao/quote')) {
+    const input = JSON.parse(String(init?.body))
+    return Response.json({quota: 100, quota_per_unit: 500000, seconds: input.seconds})
+  }
   if (path.endsWith('/v1/tasks/ejianbao')) {
     const ctx = {...context, requestBody: JSON.parse(String(init?.body))}
+    assert.equal(ctx.requestBody.expected_quota, 100)
     const upstream = adapter.buildSubmitRequest(ctx)
     assert.equal(upstream.body.inputs.script_text, '这是产品账户视频服务的本地链路测试。')
     assert.ok(upstream.headers['Idempotency-Key'])
@@ -57,7 +62,7 @@ const request: typeof fetch = async (url, init) => {
   return Response.json({task_id: 'fixture-task', ...parsed})
 }
 const video = new VideoService({database: join(output, 'video.sqlite'), inferflowUrl: 'https://fixture.invalid/openapi/v1', inferflowKey: testKey,
-  relayUrl: 'https://relay.invalid', quotaPerSecond: 10, maxUploadBytes: 1024}, request)
+  relayUrl: 'https://relay.invalid', maxUploadBytes: 1024}, request)
 const config = loadConfig({LOGTO_ISSUER: 'https://issuer.invalid/oidc', LOGTO_AUDIENCE: 'https://account.invalid',
   LOGTO_CLIENT_PLATFORM_MAP: JSON.stringify({'client-1': {platform: 'desktop', client_type: 'desktop', redirects: {success_url: 'ejbtest://billing/result'}}})})
 const {privateKey, publicKey} = await generateKeyPair('ES384')
