@@ -97,3 +97,52 @@ test('stale material preparation is reported for review instead of polling forev
     await assert.rejects(service.status(identity, account, run.id), {code: 'VIDEO_PREPARATION_INTERRUPTED'})
   } finally {service.close(); rmSync(root, {recursive: true, force: true})}
 })
+
+test('quotes the authoritative Relay amount without uploads or submission, and returns the Desktop confirmation contract', async () => {
+  const calls: string[] = []
+  const service = new VideoService({database: ':memory:', inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async (url, init) => {
+    calls.push(String(url))
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer relay-private-key')
+    assert.deepEqual(JSON.parse(String(init?.body)), {model: 'ejianbao-digitalhuman', seconds: 94})
+    return Response.json({quota: 1410000, quota_per_unit: 500000, seconds: 94})
+  })
+  try {
+    const app = createApp(loadConfig({LOGTO_ISSUER: identity.issuer, LOGTO_AUDIENCE: 'audience'}), {video: service, verifier: {verify: async () => identity}, accounts: {resolve: async () => ({...account, quotaDisplayType: 'CUSTOM', quotaPerUnit: 1, customCurrencyExchangeRate: 10})}})
+    const response = await app.request('/v1/ejianbao/quotes', {method: 'POST', headers: {authorization: 'Bearer user'}, body: JSON.stringify({script: '测'.repeat(281)})})
+    assert.equal(response.status, 200)
+    const quote = await response.json() as Record<string, unknown>
+    assert.equal(quote.pricingSource, 'relay')
+    assert.equal(quote.estimatedSeconds, 94)
+    assert.equal(quote.amount, 1410000)
+    assert.equal(quote.displayAmount, '28.2000 积分')
+    assert.equal(JSON.stringify(quote).includes(account.apiKey), false)
+    assert.deepEqual(calls, ['https://relay.test/v1/tasks/ejianbao/quote'])
+  } finally {service.close()}
+})
+
+test('failed or malformed Relay pricing never falls back to a confirmable quote', async () => {
+  let response = Response.json({error: {message: 'vendor-private-key'}}, {status: 503})
+  const service = new VideoService({database: ':memory:', inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async () => response)
+  try {
+    await assert.rejects(service.quote(identity, {script: '测试文案'}, account), {code: 'VIDEO_QUOTE_UNAVAILABLE'})
+    for (const bad of [{quota: -1, quota_per_unit: 500000, seconds: 10}, {quota: 100, quota_per_unit: 0, seconds: 10}, {quota: 100, quota_per_unit: 500000, seconds: 11}]) {
+      response = Response.json(bad)
+      await assert.rejects(service.quote(identity, {script: '测试文案'}, account), {code: 'VIDEO_UPSTREAM_INVALID'})
+    }
+  } finally {service.close()}
+})
+
+test('a changed Relay price is rejected before material upload or paid submission', async () => {
+  let amount = 100
+  const calls: string[] = []
+  const service = new VideoService({database: ':memory:', inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async url => {
+    calls.push(String(url))
+    return Response.json({quota: amount, quota_per_unit: 500000, seconds: 10})
+  })
+  try {
+    const quote = await service.quote(identity, {script: '测试文案'}, account)
+    amount = 200
+    await assert.rejects(service.create(identity, account, 'changed', material(quote.id)), {code: 'VIDEO_QUOTE_CHANGED'})
+    assert.deepEqual(calls, ['https://relay.test/v1/tasks/ejianbao/quote', 'https://relay.test/v1/tasks/ejianbao/quote'])
+  } finally {service.close()}
+})
