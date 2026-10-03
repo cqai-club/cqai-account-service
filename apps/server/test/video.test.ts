@@ -29,11 +29,12 @@ test('account gateway uploads, creates once across restart, enforces ownership, 
       return Response.json(path.endsWith('avatars') ? {avatar_id: 'a1'} : {voice_id: 'v1'})
     }
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer relay-private-key')
+    if (path.endsWith('/v1/tasks/ejianbao/quote')) return Response.json({quota: 100, quota_per_unit: 500000, seconds: 10})
     if (path.endsWith('/v1/tasks/ejianbao')) {submits++; return Response.json({task_id: 'task_1'})}
     if (path.endsWith('/artifacts/video/content')) return new Response('test-video', {headers: {'content-type': 'video/mp4'}})
     return Response.json({task_id: 'task_1', status: 'SUCCESS', progress: '100%'})
   }
-  const cfg = {database: join(root, 'video.sqlite'), inferflowUrl: 'https://vendor.test/openapi/v1', inferflowKey: 'vendor-private-key', relayUrl: 'https://relay.test', quotaPerSecond: 10, maxUploadBytes: 1024}
+  const cfg = {database: join(root, 'video.sqlite'), inferflowUrl: 'https://vendor.test/openapi/v1', inferflowKey: 'vendor-private-key', relayUrl: 'https://relay.test', maxUploadBytes: 1024}
   let service = new VideoService(cfg, request)
   const appConfig = loadConfig({LOGTO_ISSUER: identity.issuer, LOGTO_AUDIENCE: 'audience'})
   const app = () => createApp(appConfig, {video: service, verifier: {verify: async token => ({...identity, subject: token === 'other' ? 'user2' : 'user1'})}, accounts: {resolve: async () => account}})
@@ -54,7 +55,7 @@ test('account gateway uploads, creates once across restart, enforces ownership, 
     assert.equal((await done.json() as {status: string}).status, 'completed')
     const video = await app().request(`/v1/ejianbao/runs/${run.id}/video`, {headers}); assert.equal(await video.text(), 'test-video')
     assert.equal((await app().request(`/v1/ejianbao/runs/${run.id}/cancel`, {method: 'POST', headers})).status, 409)
-    const low = service.quote(identity, {script: '测试文案'})
+    const low = await service.quote(identity, {script: '测试文案'}, account)
     await assert.rejects(service.create(identity, {...account, quota: 0}, 'low', material(low.id)), {code: 'VIDEO_QUOTA_LOW'})
     assert.equal(submits, 1)
   } finally {service.close(); rmSync(root, {recursive: true, force: true})}
@@ -62,14 +63,15 @@ test('account gateway uploads, creates once across restart, enforces ownership, 
 
 test('an ambiguous paid submission is not repeated after restart or retry', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ejb-unknown-')); let submits = 0
-  const cfg = {database: join(root, 'video.sqlite'), inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', quotaPerSecond: 10, maxUploadBytes: 1024}
+  const cfg = {database: join(root, 'video.sqlite'), inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}
   const request: typeof fetch = async url => {
+    if (String(url).endsWith('/v1/tasks/ejianbao/quote')) return Response.json({quota: 100, quota_per_unit: 500000, seconds: 10})
     if (String(url).includes('/digital-human/')) return Response.json(String(url).endsWith('avatars') ? {avatar_id: 'a1'} : {voice_id: 'v1'})
     submits++; throw new Error('connection lost after submission')
   }
   let service = new VideoService(cfg, request)
   try {
-    const quote = service.quote(identity, {script: '测试文案'})
+    const quote = await service.quote(identity, {script: '测试文案'}, account)
     await assert.rejects(service.create(identity, account, 'same', material(quote.id)), {code: 'VIDEO_SUBMISSION_UNKNOWN'})
     service.close(); service = new VideoService(cfg, request)
     await assert.rejects(service.create(identity, account, 'same', material(quote.id)), {code: 'VIDEO_SUBMISSION_UNKNOWN'})
@@ -80,9 +82,12 @@ test('an ambiguous paid submission is not repeated after restart or retry', asyn
 test('stale material preparation is reported for review instead of polling forever', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ejb-stale-'))
   const database = join(root, 'video.sqlite')
-  const service = new VideoService({database, inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', quotaPerSecond: 10, maxUploadBytes: 1024}, async () => {throw new Error('upload failed')})
+  const service = new VideoService({database, inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async url => {
+    if (String(url).endsWith('/v1/tasks/ejianbao/quote')) return Response.json({quota: 100, quota_per_unit: 500000, seconds: 10})
+    throw new Error('upload failed')
+  })
   try {
-    const quote = service.quote(identity, {script: '测试文案'}, {...account, quotaDisplayType: 'CNY', quotaPerUnit: 500000, usdExchangeRate: 7})
+    const quote = await service.quote(identity, {script: '测试文案'}, {...account, quotaDisplayType: 'CNY', quotaPerUnit: 500000, usdExchangeRate: 7})
     assert.equal(quote.displayAmount, '¥0.0014')
     await assert.rejects(service.create(identity, account, 'same', material(quote.id)), {code: 'VIDEO_UPLOAD_FAILED'})
     const db = new DatabaseSync(database)
@@ -91,4 +96,53 @@ test('stale material preparation is reported for review instead of polling forev
     db.prepare('UPDATE video_runs SET data=? WHERE id=?').run(JSON.stringify(run), run.id); db.close()
     await assert.rejects(service.status(identity, account, run.id), {code: 'VIDEO_PREPARATION_INTERRUPTED'})
   } finally {service.close(); rmSync(root, {recursive: true, force: true})}
+})
+
+test('quotes the authoritative Relay amount without uploads or submission, and returns the Desktop confirmation contract', async () => {
+  const calls: string[] = []
+  const service = new VideoService({database: ':memory:', inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async (url, init) => {
+    calls.push(String(url))
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer relay-private-key')
+    assert.deepEqual(JSON.parse(String(init?.body)), {model: 'ejianbao-digitalhuman', seconds: 94})
+    return Response.json({quota: 1410000, quota_per_unit: 500000, seconds: 94})
+  })
+  try {
+    const app = createApp(loadConfig({LOGTO_ISSUER: identity.issuer, LOGTO_AUDIENCE: 'audience'}), {video: service, verifier: {verify: async () => identity}, accounts: {resolve: async () => ({...account, quotaDisplayType: 'CUSTOM', quotaPerUnit: 1, customCurrencyExchangeRate: 10})}})
+    const response = await app.request('/v1/ejianbao/quotes', {method: 'POST', headers: {authorization: 'Bearer user'}, body: JSON.stringify({script: '测'.repeat(281)})})
+    assert.equal(response.status, 200)
+    const quote = await response.json() as Record<string, unknown>
+    assert.equal(quote.pricingSource, 'relay')
+    assert.equal(quote.estimatedSeconds, 94)
+    assert.equal(quote.amount, 1410000)
+    assert.equal(quote.displayAmount, '28.2000 积分')
+    assert.equal(JSON.stringify(quote).includes(account.apiKey), false)
+    assert.deepEqual(calls, ['https://relay.test/v1/tasks/ejianbao/quote'])
+  } finally {service.close()}
+})
+
+test('failed or malformed Relay pricing never falls back to a confirmable quote', async () => {
+  let response = Response.json({error: {message: 'vendor-private-key'}}, {status: 503})
+  const service = new VideoService({database: ':memory:', inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async () => response)
+  try {
+    await assert.rejects(service.quote(identity, {script: '测试文案'}, account), {code: 'VIDEO_QUOTE_UNAVAILABLE'})
+    for (const bad of [{quota: -1, quota_per_unit: 500000, seconds: 10}, {quota: 100, quota_per_unit: 0, seconds: 10}, {quota: 100, quota_per_unit: 500000, seconds: 11}]) {
+      response = Response.json(bad)
+      await assert.rejects(service.quote(identity, {script: '测试文案'}, account), {code: 'VIDEO_UPSTREAM_INVALID'})
+    }
+  } finally {service.close()}
+})
+
+test('a changed Relay price is rejected before material upload or paid submission', async () => {
+  let amount = 100
+  const calls: string[] = []
+  const service = new VideoService({database: ':memory:', inferflowUrl: 'https://vendor.test', inferflowKey: 'secret', relayUrl: 'https://relay.test', maxUploadBytes: 1024}, async url => {
+    calls.push(String(url))
+    return Response.json({quota: amount, quota_per_unit: 500000, seconds: 10})
+  })
+  try {
+    const quote = await service.quote(identity, {script: '测试文案'}, account)
+    amount = 200
+    await assert.rejects(service.create(identity, account, 'changed', material(quote.id)), {code: 'VIDEO_QUOTE_CHANGED'})
+    assert.deepEqual(calls, ['https://relay.test/v1/tasks/ejianbao/quote', 'https://relay.test/v1/tasks/ejianbao/quote'])
+  } finally {service.close()}
 })
